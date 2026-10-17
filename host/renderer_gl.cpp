@@ -8,6 +8,7 @@
  * The calls into the library are marked LIB: they are compiled only with
  * the library (make sdl GLR=1 ...).  What else it will need: TODO-lib.md.
  */
+#include <cmath>
 #include <string>
 #include "imgui.h"
 #include "game_renderer.hpp"
@@ -19,10 +20,19 @@
     #include "renderizeitor/include/renderizeitor.h"
     static RzContext* ctx;
 
+    // The internal cameras' filter state (IIR, one step per physics tick,
+    // opengl_tick): the reference vertex and the camera's axes.
+    struct CamFilter {
+        bool ready;                 // false: start from the next sample
+        RzVertex pos;               // the reference vertex (camera_pt), in tiles
+        RzVertex fwd, up;           // where the internal camera looks, and its up
+    };
+
     struct carrodef_s{
         int32_t id;
         int16_t n_points;
         uint16_t camera_pt;
+        CamFilter cam;
     };
 
     carrodef_s carros[5];
@@ -68,6 +78,32 @@
     }
 
     extern int broke_some_ice;
+
+    // How much of the way to the new sample the filters go each tick
+    // (120 Hz): light for F1, which follows the car, stronger for F2.
+    constexpr float CAM_FILTER_F1 = 0.35f;
+    constexpr float CAM_FILTER_F2 = 0.12f;
+    constexpr float CAM_FILTER_POS = 0.4f;
+    constexpr float CAM_UP_BIAS_F2 = 0.6f;  // F2's up leans towards the sky
+
+    static RzVertex rz_toward(RzVertex s, RzVertex t, float k)
+    {
+        return { s.x + (t.x - s.x) * k, s.y + (t.y - s.y) * k, s.z + (t.z - s.z) * k };
+    }
+
+    static RzVertex rz_normalized(RzVertex v)
+    {
+        float l = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
+        return l > 0 ? RzVertex{ v.x / l, v.y / l, v.z / l } : v;
+    }
+
+    // A vertex of the game in the library's units (tiles), z kept off the
+    // underflow (a car upside down in a low part of the map).
+    static RzVertex rz_point(const Pos &p)
+    {
+        auto z = p.z.raw < 0xfe000000 ? p.z.raw : 0;
+        return { F_8_24(p.x.raw), F_8_24(p.y.raw), F_8_24(z) };
+    }
 
 // rzCreateWindow makes an OpenGL context of its own on the host's window and
 // leaves it current, and rzDestroy deletes it.  The host (ImGui: the map
@@ -230,9 +266,34 @@ static void game_keys()
 }
 
 // After each physics tick (120 Hz, two or so per frame): the state of the
-// game at that tick, for what needs more than one sample per frame.
+// game at that tick, for what needs more than one sample per frame.  Here:
+// one step of the internal cameras' filters, for every car (the camera can
+// move to another one).
 void opengl_tick()
 {
+#ifdef TEREP2_GLR
+    const float k = internalCamMode == 2 ? CAM_FILTER_F2 : CAM_FILTER_F1;
+    for (int ci = 0; ci < 5; ci++) {
+        if (carros[ci].id < 0)
+            continue;
+        Car &car = car_get(ci);
+        RzVertex pos = rz_point(car.points[carros[ci].camera_pt].pos);
+        RzVertex f = F_RZVEC3(car.axis_y(), -1.0f);     // axis_y points to the back
+        RzVertex r = F_RZVEC3(car.axis_x(), 1.0f);
+        RzVertex up = rz_cross(f, r);
+        if (internalCamMode == 2)
+            up.z += CAM_UP_BIAS_F2;
+
+        CamFilter &c = carros[ci].cam;
+        if (!c.ready) {
+            c = { true, pos, rz_normalized(f), rz_normalized(up) };
+            continue;
+        }
+        c.pos = rz_toward(c.pos, pos, CAM_FILTER_POS);
+        c.fwd = rz_normalized(rz_toward(c.fwd, rz_normalized(f), k));
+        c.up = rz_normalized(rz_toward(c.up, rz_normalized(up), k));
+    }
+#endif
 }
 
 bool opengl_frame(int win_w, int win_h, PictureRect *where)
@@ -253,21 +314,10 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         updateSprites();
         updateCamDists();
         if(internalCamMode){
-            auto car = car_get(currTgt);
-
-            auto x = car.axis_x();
-            auto y = car.axis_y();
-
-            auto f = F_RZVEC3(y, -1.0f);
-            auto r = F_RZVEC3(x, 1.0f);
-
-            auto up = rz_cross(f,r);
-            if(internalCamMode == 2){
-                //small bias up
-                up.z += 0.6f;
-            }
-            
-            rzSetCameraInternalAxes(ctx, &f, &up);
+            // the filtered axes (opengl_tick) of the car the camera is on
+            const CamFilter &c = carros[world.player_car[0]].cam;
+            if (c.ready)
+                rzSetCameraInternalAxes(ctx, &c.fwd, &c.up);
         }
 
         rzRender(ctx);
@@ -302,21 +352,17 @@ static void updateCars(){
         }
 
         int n = carros[ci].n_points;
-        auto car = car_get(ci);
+        Car &car = car_get(ci);
 
         RzVertex ptrs[n];
 
         for(int i =0; i< n; i++){
-            auto p = car.points[i].pos;
-
-            //prevents underflow related graphical glitches,
-            //most notable when the car gets upside down in a low part of the map
-            auto z = p.z.raw < 0xfe000000 ? p.z.raw : 0;
-
-            ptrs[i].x = F_8_24(p.x.raw);
-            ptrs[i].y = F_8_24(p.y.raw);
-            ptrs[i].z = F_8_24(z);
+            ptrs[i] = rz_point(car.points[i].pos);
         }
+        // the reference vertex (where the camera is): filtered, see opengl_tick;
+        // most cars do not use it for any polygon
+        if (carros[ci].cam.ready)
+            ptrs[carros[ci].camera_pt] = carros[ci].cam.pos;
 
         //TODO review this constant, the limits are 45 deg
         float steering = (float)car.steer.raw * -0.0001f;
@@ -337,6 +383,7 @@ static void loadCar(int i, std::string cpcx){
     rzCreateObject(ctx, carros[i].n_points, &idCar);
     carros[i].id = idCar;
     carros[i].camera_pt = car.ref_index;
+    carros[i].cam.ready = false;
 
     if(cpcx != ""){
         rzLoadObjectTexture(ctx, idCar, cpcx.c_str());
