@@ -72,8 +72,8 @@
     // (120 Hz): light for F1, which follows the car, stronger for F2.
     constexpr float CAM_FILTER_F1 = 0.35f;
     constexpr float CAM_FILTER_F2 = 0.12f;
-    constexpr float CAM_FILTER_POS = 0.4f;
-    constexpr float CAM_UP_BIAS_F2 = 0.6f;  // F2's up leans towards the sky
+    constexpr float CAM_FILTER_POS = 0.5f;
+    constexpr float CAM_UP_BIAS_F2 = 0.7f;  // F2's up leans towards the sky
 
     // b -> a, from the 16.16 positions (any unit: only directions are used)
     static Vec3f delta(const Pos &a, const Pos &b)
