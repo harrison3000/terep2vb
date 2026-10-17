@@ -62,16 +62,6 @@
         _v = (float)uv_.v * scale; \
     })
 
-    #define F_RZVEC3(_v3, sc)({           \
-        float scale = sc / 65535.0f;\
-        RzVertex ret = { \
-            .x = (float)_v3.x * scale, \
-            .y = (float)_v3.y * scale, \
-            .z = (float)_v3.z * scale, \
-        };   \
-        ret; \
-    })
-
     static inline RzVertex rz_cross(RzVertex a, RzVertex b)
     {
         RzVertex r;
@@ -93,6 +83,18 @@
     static RzVertex rz_toward(RzVertex s, RzVertex t, float k)
     {
         return { s.x + (t.x - s.x) * k, s.y + (t.y - s.y) * k, s.z + (t.z - s.z) * k };
+    }
+
+    // b -> a, from the 16.16 positions (any unit: only directions are used)
+    static RzVertex rz_delta(const Pos &a, const Pos &b)
+    {
+        Vec3 d = a - b;
+        return { (float)d.x, (float)d.y, (float)d.z };
+    }
+
+    static RzVertex rz_add(RzVertex a, RzVertex b)
+    {
+        return { a.x + b.x, a.y + b.y, a.z + b.z };
     }
 
     static RzVertex rz_normalized(RzVertex v)
@@ -282,19 +284,24 @@ void CamFilter::step(Car &car, uint16_t camera_pt, int mode)
 {
     const float k = mode == 2 ? CAM_FILTER_F2 : CAM_FILTER_F1;
     RzVertex p = rz_point(car.points[camera_pt].pos);
-    RzVertex f = F_RZVEC3(car.axis_y(), -1.0f);         // axis_y points to the back
-    RzVertex r = F_RZVEC3(car.axis_x(), 1.0f);
-    RzVertex u = rz_cross(f, r);
+    // Car::axis_x and axis_y (physics.cpp) in float, from the exact
+    // differences of the body vertices 4..7: to the right, and to the front
+    // (axis_y, (4 - 6) + (5 - 7), points to the back: here it is reversed)
+    const CarVertex *v = car.vertices();
+    RzVertex r = rz_normalized(rz_delta(v[7].pos, v[6].pos));
+    RzVertex f = rz_normalized(rz_add(rz_delta(v[6].pos, v[4].pos), rz_delta(v[7].pos, v[5].pos)));
+    RzVertex u = rz_cross(f, r);                        // unit-sized: the bias below is in those units
     if (mode == 2)
         u.z += CAM_UP_BIAS_F2;
+    u = rz_normalized(u);
 
     if (!ready) {
-        *this = { true, p, rz_normalized(f), rz_normalized(u) };
+        *this = { true, p, f, u };
         return;
     }
     pos = rz_toward(pos, p, CAM_FILTER_POS);
-    fwd = rz_normalized(rz_toward(fwd, rz_normalized(f), k));
-    up = rz_normalized(rz_toward(up, rz_normalized(u), k));
+    fwd = rz_normalized(rz_toward(fwd, f, k));
+    up = rz_normalized(rz_toward(up, u, k));
 }
 #endif
 
