@@ -20,24 +20,28 @@
     #include "renderizeitor/include/renderizeitor.h"
     static RzContext* ctx;
 
-    // The internal cameras' filter state (IIR, one step per physics tick,
-    // opengl_tick): the reference vertex and the camera's axes.
+    // The internal camera's filter (IIR, one step per physics tick,
+    // opengl_tick): the reference vertex and the camera's axes of the car it
+    // is on.  Only while it is on (the library smooths the other cameras);
+    // restarted when the car or the camera changes.
     struct CamFilter {
         bool ready;                 // false: start from the next sample
         RzVertex pos;               // the reference vertex (camera_pt), in tiles
         RzVertex fwd, up;           // where the internal camera looks, and its up
+
+        void step(Car &car, uint16_t camera_pt, int mode);     // one tick; mode: 1 F1, 2 F2
     };
 
     struct carrodef_s{
         int32_t id;
         int16_t n_points;
         uint16_t camera_pt;
-        CamFilter cam;
     };
 
     carrodef_s carros[5];
     int currTgt = 0;
     int internalCamMode = 0;
+    static CamFilter cam_filter;
 
     static void updateCars();
     static int isLine(uint16_t[], int);
@@ -225,6 +229,7 @@ static void game_keys()
         auto c = carros[world.player_car[0]];
         rzSetCameraTarget(ctx, c.id, c.camera_pt);
         currTgt = c.id;
+        cam_filter.ready = false;
         #endif
         break;
     }
@@ -232,26 +237,31 @@ static void game_keys()
     case 59:{ //F1: internal
         rzSetCamera(ctx, RZ_CAMERA_INTERNAL);
         internalCamMode = 1;
+        cam_filter.ready = false;
         break;
     }
     case 60:{ //F2: internal2
         rzSetCamera(ctx, RZ_CAMERA_INTERNAL);
         internalCamMode = 2;
+        cam_filter.ready = false;
         break;
     }
     case 61:{ //F3: freeze pos
         rzSetCamera(ctx, RZ_CAMERA_FOLLOW_FREEZE);
         internalCamMode = 0;
+        cam_filter.ready = false;
         break;
     }
     case 62:{ //F4: normal
         rzSetCamera(ctx, RZ_CAMERA_FOLLOW);
         internalCamMode = 0;
+        cam_filter.ready = false;
         break;
     }
     case 63:{ //F5: overview
         rzSetCamera(ctx, RZ_CAMERA_OVERVIEW);
         internalCamMode = 0;
+        cam_filter.ready = false;
         break;
     }
     #endif
@@ -265,34 +275,38 @@ static void game_keys()
     keys[0] = 0;
 }
 
+#ifdef TEREP2_GLR
+// One step towards the car's current reference vertex and axes (the first
+// one after a reset starts there).
+void CamFilter::step(Car &car, uint16_t camera_pt, int mode)
+{
+    const float k = mode == 2 ? CAM_FILTER_F2 : CAM_FILTER_F1;
+    RzVertex p = rz_point(car.points[camera_pt].pos);
+    RzVertex f = F_RZVEC3(car.axis_y(), -1.0f);         // axis_y points to the back
+    RzVertex r = F_RZVEC3(car.axis_x(), 1.0f);
+    RzVertex u = rz_cross(f, r);
+    if (mode == 2)
+        u.z += CAM_UP_BIAS_F2;
+
+    if (!ready) {
+        *this = { true, p, rz_normalized(f), rz_normalized(u) };
+        return;
+    }
+    pos = rz_toward(pos, p, CAM_FILTER_POS);
+    fwd = rz_normalized(rz_toward(fwd, rz_normalized(f), k));
+    up = rz_normalized(rz_toward(up, rz_normalized(u), k));
+}
+#endif
+
 // After each physics tick (120 Hz, two or so per frame): the state of the
 // game at that tick, for what needs more than one sample per frame.  Here:
-// one step of the internal cameras' filters, for every car (the camera can
-// move to another one).
+// one step of the internal camera's filter, for the car it is on.
 void opengl_tick()
 {
 #ifdef TEREP2_GLR
-    const float k = internalCamMode == 2 ? CAM_FILTER_F2 : CAM_FILTER_F1;
-    for (int ci = 0; ci < 5; ci++) {
-        if (carros[ci].id < 0)
-            continue;
-        Car &car = car_get(ci);
-        RzVertex pos = rz_point(car.points[carros[ci].camera_pt].pos);
-        RzVertex f = F_RZVEC3(car.axis_y(), -1.0f);     // axis_y points to the back
-        RzVertex r = F_RZVEC3(car.axis_x(), 1.0f);
-        RzVertex up = rz_cross(f, r);
-        if (internalCamMode == 2)
-            up.z += CAM_UP_BIAS_F2;
-
-        CamFilter &c = carros[ci].cam;
-        if (!c.ready) {
-            c = { true, pos, rz_normalized(f), rz_normalized(up) };
-            continue;
-        }
-        c.pos = rz_toward(c.pos, pos, CAM_FILTER_POS);
-        c.fwd = rz_normalized(rz_toward(c.fwd, rz_normalized(f), k));
-        c.up = rz_normalized(rz_toward(c.up, rz_normalized(up), k));
-    }
+    int ci = world.player_car[0];
+    if (internalCamMode && carros[ci].id >= 0)
+        cam_filter.step(car_get(ci), carros[ci].camera_pt, internalCamMode);
 #endif
 }
 
@@ -315,7 +329,7 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         updateCamDists();
         if(internalCamMode){
             // the filtered axes (opengl_tick) of the car the camera is on
-            const CamFilter &c = carros[world.player_car[0]].cam;
+            const CamFilter &c = cam_filter;
             if (c.ready)
                 rzSetCameraInternalAxes(ctx, &c.fwd, &c.up);
         }
@@ -361,8 +375,8 @@ static void updateCars(){
         }
         // the reference vertex (where the camera is): filtered, see opengl_tick;
         // most cars do not use it for any polygon
-        if (carros[ci].cam.ready)
-            ptrs[carros[ci].camera_pt] = carros[ci].cam.pos;
+        if (internalCamMode && cam_filter.ready && ci == world.player_car[0])
+            ptrs[carros[ci].camera_pt] = cam_filter.pos;
 
         //TODO review this constant, the limits are 45 deg
         float steering = (float)car.steer.raw * -0.0001f;
@@ -383,7 +397,7 @@ static void loadCar(int i, std::string cpcx){
     rzCreateObject(ctx, carros[i].n_points, &idCar);
     carros[i].id = idCar;
     carros[i].camera_pt = car.ref_index;
-    carros[i].cam.ready = false;
+    cam_filter.ready = false;
 
     if(cpcx != ""){
         rzLoadObjectTexture(ctx, idCar, cpcx.c_str());
