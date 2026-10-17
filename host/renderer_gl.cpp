@@ -457,7 +457,7 @@ static void loadCar(int i, std::string cpcx){
             continue;
         }
 
-        printf("unhandled: %d\n", o.op);
+        //printf("unhandled: %d\n", o.op);
     }
 
     if(wi == 4){
