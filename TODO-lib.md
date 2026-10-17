@@ -23,11 +23,13 @@ existe no host está em `host/renderer_api.hpp` (contexto, arquivos do mapa, cam
 - [ ] Core profile: nada de pipeline fixo (`glBegin`, matrizes do GL); funções além do GL 1.1
       precisam de loader. O ImGui tem o loader interno dele, só para ele; a lib traz o seu
       (glad, epoxy...) ou carrega pelo `SDL_GL_GetProcAddress`.
-- [x] Encaixe: `host/renderer_gl.cpp` (`opengl_start`, `opengl_frame`, `opengl_stop`), chamado
+- [x] Encaixe: `host/renderer_gl.cpp` (`opengl_start`, `opengl_frame`, `opengl_tick`, `opengl_stop`), chamado
       pelo `run()` entre `gui_begin()` e `gui_end()`; as chamadas da lib vão nas linhas `LIB:`.
       O `gui_begin()` limpa a tela, então o que a lib desenha não é apagado.
 - [x] Escolher o renderizador: combo "Renderer" no seletor e `-r software|opengl`; o padrão é o
       por software. O `opengl` só existe com `make sdl GLR=1 GLR_DIR=... GLR_LIB=...`.
+- [ ] `opengl_tick` (vazio): chamado depois de cada tick de física (120 Hz, ~2 por quadro, não
+      com o jogo pausado), pra guardar o que precisa de precisão de subquadro.
 - [ ] Trocar as linhas `LIB:` pelas chamadas reais: `#include` do header, init com
       `gui_window()`/`gui_context()`/`map_files(".")`/`map_layers()`, o draw a cada quadro, o
       shutdown.

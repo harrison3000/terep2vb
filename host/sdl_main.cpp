@@ -183,8 +183,11 @@ static Ending run(const GameRenderer &renderer, HostOptions *host, const char *b
 
         uint64_t now = SDL_GetPerformanceCounter();
         while (now >= next_tick) {          // 120 Hz physics, stopped while the menu is open
-            if (!menu)
+            if (!menu) {
                 physics_tick();
+                if (renderer.tick)
+                    renderer.tick();
+            }
             next_tick += freq / 120;
         }
         if (now >= next_frame) {            // 60 Hz display

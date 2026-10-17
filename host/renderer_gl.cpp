@@ -220,6 +220,12 @@ static void game_keys()
     keys[0] = 0;
 }
 
+// After each physics tick (120 Hz, two or so per frame): the state of the
+// game at that tick, for what needs more than one sample per frame.
+void opengl_tick()
+{
+}
+
 bool opengl_frame(int win_w, int win_h, PictureRect *where)
 {
     #ifdef TEREP2_GLR

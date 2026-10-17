@@ -15,6 +15,8 @@ struct GameRenderer {
     bool available;                 // compiled in
     bool (*start)();                // after game_init, in the map's directory; false: cannot
     bool (*frame)(int win_w, int win_h, PictureRect *where);    // false: the game asked to end
+    void (*tick)();                 // after each physics tick (120 Hz, not while paused), to
+                                    // record what moves between frames; may be null
     void (*stop)();                 // before the game's memory is freed
 };
 
@@ -28,4 +30,5 @@ bool software_frame(int win_w, int win_h, PictureRect *where);
 void software_stop();
 bool opengl_start();
 bool opengl_frame(int win_w, int win_h, PictureRect *where);
+void opengl_tick();
 void opengl_stop();
