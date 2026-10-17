@@ -2,25 +2,19 @@
  * SDL2 host: a window, the keyboard and the original timing (physics at
  * 120 Hz, display at 60 Hz, as in the Win16 port).
  *
- *   terep2vibed [-s scale] [-E option]... [-n] [-m] [-r renderer] [mapdir]
+ *   terep2vibed [mapdir]
  *
- * Without mapdir a chooser opens first (launcher.cpp), starting in the
- * current directory, with the scale and the extra options as given here.
- *
- * scale: render at 320*scale x 200*scale (1 = the original picture).
- * -E option, --extra-options option: turn on an extra option (see extra_option_list),
- * such as a fix of a bug of the original, or "all".
- *
- * -n, --no-sound: no sound (the AdLib emulator is not started).
- * -m, --minimap: the map and the cars in the bottom right corner.
- * -r, --renderer name: software (the default) or opengl (if compiled in).
+ * Opens the map chooser (launcher.cpp) with the saved preferences
+ * (prefs.hpp), at mapdir with it selected if given, else where the last map
+ * was chosen.
  *
  * Esc pauses the game with a menu: the render scale (software renderer)
- * and the minimap; Esc again resumes, and its button quits or goes back to
- * the chooser if the game was started from it.
+ * and the minimap; Esc again resumes, and its button goes back to the
+ * chooser.
  */
 #include <algorithm>
 #include <climits>
+#include <filesystem>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -33,6 +27,7 @@
 #include "launcher.hpp"
 #include "minimap.hpp"
 #include "opl_sound.hpp"
+#include "prefs.hpp"
 
 constexpr int MIN_ZOOM = 3;                // a 320x200 picture opens at least this many times bigger
 
@@ -117,7 +112,7 @@ static void fit_window()
 // The Esc menu: the game is paused while it is open, and Esc resumes it.
 // The software renderer can change the scale; both, the minimap.  Returns
 // true when its button ends the game.
-static bool esc_menu(const GameRenderer &renderer, HostOptions *host, Minimap **mini, bool *open, const char *back)
+static bool esc_menu(const GameRenderer &renderer, HostOptions *host, Minimap **mini, bool *open)
 {
     bool end = false;
     const ImGuiViewport *vp = ImGui::GetMainViewport();
@@ -143,15 +138,15 @@ static bool esc_menu(const GameRenderer &renderer, HostOptions *host, Minimap **
     if (ImGui::Button("Resume (Esc)", ImVec2(120, 0)))
         *open = false;
     ImGui::SameLine();
-    if (ImGui::Button(back, ImVec2(0, 0)))
+    if (ImGui::Button("Back to the map chooser", ImVec2(0, 0)))
         end = true;
     ImGui::End();
     return end;
 }
 
 // The game loop: physics at 120 Hz, the picture at 60 Hz.  Esc opens the
-// menu above (back: what ending the game does, for its button).
-static Ending run(const GameRenderer &renderer, HostOptions *host, const char *back)
+// menu above.
+static Ending run(const GameRenderer &renderer, HostOptions *host)
 {
     if (!renderer.start()) {
         fprintf(stderr, "the %s renderer could not start\n", renderer.name);
@@ -201,7 +196,7 @@ static Ending run(const GameRenderer &renderer, HostOptions *host, const char *b
                 running = false;
             // the menu first: turning the minimap off deletes its texture, which
             // must not be in this frame's draw lists any more
-            if (menu && esc_menu(renderer, host, &mini, &menu, back))
+            if (menu && esc_menu(renderer, host, &mini, &menu))
                 running = false;
             if (mini)
                 mini->draw(ImGui::GetForegroundDrawList(), at.x0, at.y0, at.k, screen_w(), screen_h());
@@ -217,7 +212,7 @@ static Ending run(const GameRenderer &renderer, HostOptions *host, const char *b
 
 // One game on map, from a fresh state, until Esc or the window is
 // closed; everything it used is freed again.
-static Ending play(const std::string &map, HostOptions &host, bool chooser)
+static Ending play(const std::string &map, HostOptions &host)
 {
     char here[PATH_MAX];
     if (!getcwd(here, sizeof here))
@@ -234,7 +229,7 @@ static Ending play(const std::string &map, HostOptions &host, bool chooser)
     else if (game_init() != 0 || world.num_cars <= 0)
         fprintf(stderr, "could not load the map in %s (no car1.dat?)\n", map.c_str());
     else
-        end = run(game_renderers[host.renderer], &host, chooser ? "Back to the map chooser" : "Quit");
+        end = run(game_renderers[host.renderer], &host);
     opl_sound_stop();
     host_free_game();
     if (chdir(here) != 0)
@@ -244,88 +239,43 @@ static Ending play(const std::string &map, HostOptions &host, bool chooser)
 
 int main(int argc, char **argv)
 {
+    // the chooser's defaults, then the saved preferences; a map directory
+    // given on the command line is where the chooser opens
     std::string map;
-    int a = 1;
-    bool scale_given = false;
     HostOptions host;
-    for (; a < argc && argv[a][0] == '-'; a++) {
-        std::string_view opt = argv[a];
-        if (opt == "-n" || opt == "--no-sound") {
-            host.no_sound = true;
-        } else if (opt == "-m" || opt == "--minimap") {
-            host.minimap = true;
-        } else if ((opt == "-r" || opt == "--renderer") && a + 1 < argc) {
-            int r = game_renderer_find(argv[++a]);
-            if (r < 0 || !game_renderers[r].available) {
-                fprintf(stderr, "%s renderer %s; known:", r < 0 ? "unknown" : "not compiled in:", argv[a]);
-                for (int i = 0; i < game_renderer_count; i++)
-                    if (game_renderers[i].available)
-                        fprintf(stderr, " %s", game_renderers[i].name);
-                fprintf(stderr, "\n");
-                return 2;
-            }
-            host.renderer = r;
-        } else if (opt == "-s" && a + 1 < argc) {
-            render_scale = atoi(argv[++a]);
-            scale_given = true;
-        } else if ((opt == "-E" || opt == "--extra-options") && a + 1 < argc) {
-            if (!extra_option_enable(argv[++a])) {
-                fprintf(stderr, "unknown option %s; known:", argv[a]);
-                for (int i = 0; i < extra_option_count; i++)
-                    fprintf(stderr, " %s", extra_option_list[i].name);
-                fprintf(stderr, " all\n");
-                return 2;
-            }
-        } else {
-            break;
-        }
-    }
-    if (a < argc)
-        map = argv[a];
-    if (render_scale < 1 || render_scale > MAX_RENDER_SCALE) {
-        fprintf(stderr, "scale must be 1..%d\n", MAX_RENDER_SCALE);
-        return 1;
+    render_scale = 3;
+    extra_options.fix_ice_bug = true;
+    prefs_load(&host, &map);
+    if (argc > 1) {
+        std::error_code ec;
+        std::filesystem::path p = std::filesystem::absolute(argv[1], ec).lexically_normal();
+        if (!p.has_filename())                      // "dir/"
+            p = p.parent_path();
+        map = ec ? argv[1] : p.string();
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
         fprintf(stderr, "SDL: %s\n", SDL_GetError());
         return 1;
     }
-    const bool chooser = map.empty();
-    int win_w = 320 * MIN_ZOOM, win_h = 200 * MIN_ZOOM;
-    if (!chooser)
-        window_size(&win_w, &win_h);
-    SDL_Window *win = gui_open(win_w, win_h);
+    SDL_Window *win = gui_open(320 * MIN_ZOOM, 200 * MIN_ZOOM);
     if (!win)
         return 1;
-    if (chooser) {
-        if (!scale_given)
-            render_scale = 3;                       // the chooser starts at 3x
-        extra_options.fix_ice_bug = true;           // offered on there; the game alone stays faithful
-    }
-
-    // Esc in a game started from the chooser goes back to it, for another map
+    // Esc in a game goes back to the chooser, for another map
     for (;;) {
-        if (chooser) {
-            SDL_SetWindowSize(win, 320 * MIN_ZOOM, 200 * MIN_ZOOM);
-            SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-            if (!launcher_run(&map, &host))
-                break;
-            window_size(&win_w, &win_h);            // for the scale chosen there
-            SDL_SetWindowSize(win, win_w, win_h);
-            SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-        }
-        Ending end = play(map, host, chooser);
-        if (end == Ending::FAILED && !chooser) {
-            gui_close();
-            SDL_Quit();
-            return 1;
-        }
-        if (end == Ending::QUIT || !chooser)
+        SDL_SetWindowSize(win, 320 * MIN_ZOOM, 200 * MIN_ZOOM);
+        SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        if (!launcher_run(&map, &host))
+            break;
+        int win_w, win_h;
+        window_size(&win_w, &win_h);                // for the scale chosen there
+        SDL_SetWindowSize(win, win_w, win_h);
+        SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        prefs_save(host, map);                      // what was chosen, if it changed
+        if (play(map, host) == Ending::QUIT)
             break;
     }
     gui_close();
     SDL_Quit();
     return 0;
 }
-

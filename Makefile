@@ -43,7 +43,7 @@ GLR_FLAGS := -DTEREP2_GLR $(if $(GLR_DIR),-I$(GLR_DIR))
 endif
 IMGUI    := host/imgui
 OPL3     := host/Nuked-OPL3
-SDL_SRC  := sdl_main launcher voxel_preview pcx opl_sound minimap gui renderer_api \
+SDL_SRC  := sdl_main launcher prefs voxel_preview pcx opl_sound minimap gui renderer_api \
             game_renderer renderer_sw renderer_gl
 SDL_OBJ  := $(patsubst %,build/sdl/%.o,$(SDL_SRC))
 SDL_FLAGS = $(CXXFLAGS) $(GLR_FLAGS) $(shell sdl2-config --cflags) -I$(IMGUI) -I$(IMGUI)/backends -I$(OPL3)

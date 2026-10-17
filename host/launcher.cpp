@@ -51,6 +51,8 @@ public:
         }
         fs::path map(last);
         enter(map.parent_path());
+        if (cwd.empty())                // gone since (a map from the preferences)
+            enter(fs::current_path());
         for (int i = 0; i < (int)entries.size(); i++)
             if (entries[i].name == map.filename().string())
                 select(i);

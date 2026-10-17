@@ -23,24 +23,18 @@ make test       # replays the Win16 recordings in tests/ and compares the frames
 make -j8 all sdl  # in parallel: each source is its own object in build/, rebuilt when its headers change
 make coverage  # which lines of src/ the tests run (clang/LLVM): summary, and build/cov/html
 make coverage REPLAY="rec/dir data/Map"  # the same for one recording only
-./terep2vibed       # opens the map chooser, starting in the current directory
-./terep2vibed data/Asphalt
-./terep2vibed -s 4    # renders at 1280x800 (scale 1 to 8)
-./terep2vibed -E fix-ice-bug # turns on an extra option (-E all: every one), see below
-./terep2vibed -n      # (--no-sound) no sound: the AdLib emulator is not even started
-./terep2vibed -m      # (--minimap) the map and the cars in the bottom right corner
-./terep2vibed -r opengl # (--renderer) the external OpenGL renderer, if built in (see below)
+./terep2vibed              # opens the map chooser where the last map was chosen
+./terep2vibed data/Asphalt # opens it with that map selected
 ```
 
 C++17 with GNU extensions (`__attribute__((packed))` for the PCX header, `-fwrapv` and `#embed`), so it builds with
 g++ 15+ or clang++ 19+. Tested on Linux x86-64 with both. The code does not depend on pointer
 size, but it has not been tested on 32 bits. Physics runs at 120 Hz and the display at 60 Hz, as
-in the Win16 port. The window opens at the size of the picture at the chosen scale (`-s`),
+in the Win16 port. The game's window opens at the size of the picture at the chosen scale,
 enlarged to at least 960x600 and reduced by a whole factor if it does not fit on the screen.
 Esc pauses the game and opens a small menu: the render scale (software renderer only; the
-window follows it) and the minimap. Esc again resumes; the menu's button quits, or, in a game
-started from the map chooser, goes back to the chooser, where another map (or other options)
-can be picked. Each game starts from scratch: `game_init` resets
+window follows it) and the minimap. Esc again resumes; the menu's button goes back to the
+chooser, where another map (or other options) can be picked. Each game starts from scratch: `game_init` resets
 the global state (`state_reset`) and everything the game allocated (`game_free`).
 
 Window: the SDL host owns one OpenGL 3.3 core context (`host/gui.cpp`). The map chooser, the
@@ -48,7 +42,7 @@ game's picture (the software renderer's frame, as a texture, scaled to the windo
 shape) and the minimap all go through Dear ImGui on it. An external OpenGL renderer can draw into
 the same context; `host/renderer_api.hpp` gives it the context, the real paths of the map's files
 (`map_files()`) and the map's height and tile layers (`map_layers()`). The renderer is chosen in
-the map chooser ("Renderer") or with `-r`: `software` (the default, the game's own picture) or
+the map chooser ("Renderer"): `software` (the default, the game's own picture) or
 `opengl`, which is only there when the host is built with the library:
 
     make sdl GLR=1 GLR_DIR=its/include GLR_LIB="path/to/its.a ..."
@@ -62,31 +56,35 @@ Sound: the game writes the AdLib (OPL2) registers as the original did to ports 3
 (`src/sound.cpp`: an engine voice per view and the crash effect); the SDL host plays them through
 [Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3) (LGPL 2.1, a git submodule), an emulator of
 the OPL3 chip that starts in OPL2 mode, from an SDL audio callback at 48 kHz
-(`host/opl_sound.cpp`). "Disable sound" in the map chooser, or `-n` / `--no-sound`, leaves the
+(`host/opl_sound.cpp`). "Disable sound" in the map chooser leaves the
 audio device and the emulator alone. The test host does not play anything.
 
-Minimap ("Minimap" in the map chooser, off by default, or `-m` / `--minimap`): the SDL host draws
+Minimap ("Minimap" in the map chooser or the Esc menu, off by default): the SDL host draws
 the map semi-transparent in the bottom right corner, each cell in its colour and darker where it
 is low, with a square in a colour of its own and the number of each car (in the game's font) where
 its reference point is; x is to the right and y down, so a camera turned to yaw 0 looks up the
 minimap. It is drawn over the game's picture through ImGui (`host/minimap.cpp`), so the
 game's picture and the tests do not change.
 
-Without a map directory, `terep2vibed` first opens a map chooser (Dear ImGui): the directories
-on the left, starting in the current one (`[map]` marks those with a `map.pcx` and a
+`terep2vibed` opens a map chooser (Dear ImGui): the directories on the left, starting where
+the last map was chosen, or at the map directory given on the command line (its only argument),
+with that map selected (`[map]` marks those with a `map.pcx` and a
 `col.pcx`); on the right a preview of the selected map, its terrain turning, drawn with the
 Comanche "voxel space" technique from `map.pcx` (heights) and `col.pcx` (colour of each cell
-through its palette); below it the render scale and the options (`fix-ice-bug` comes ticked
-there, and the scale starts at 3 unless `-s` is given; without the chooser the game stays
-faithful unless `-E` says otherwise, at scale 1 unless `-s` says otherwise). A click selects a
-directory, a double click enters it or plays the map, like the Play button (which needs a
-`car1.dat` too). `-s` and `-E` given on the command line are the initial values. The chooser
+through its palette); below it the render scale and the options (the first time, the scale
+is 3 and `fix-ice-bug` is ticked). A click selects a directory, a double click enters it or
+plays the map, like the Play button (which needs a `car1.dat` too). The chooser
 lives in `host/` (`launcher.cpp`, `voxel_preview.cpp`, `pcx.cpp`, with its own PCX reader) and
 does not touch the game code.
 
-`-E name` (or `--extra-options name`; in both hosts, repeatable, `all` for every one) turns on
-an extra option: a fix of a bug of the original, or another change to what it does. By default
-the game behaves like the original. The options are listed in `extra_option_list` (`game.cpp`)
+The chooser's choices (renderer, scale, minimap, sound, extra options and the last map) are
+kept in `prefs.txt`, one `key: value` per line, in SDL's preference directory
+(`~/.local/share/terep2vibed` on Linux, `%APPDATA%\terep2vibed` on Windows). They are read when the
+chooser opens and written when a game starts, only if something changed.
+
+Extra options are fixes of bugs of the original, or other changes to what it does; without
+them the game behaves like the original (the test host turns them on with `-E name`,
+repeatable, `all` for every one). The options are listed in `extra_option_list` (`game.cpp`)
 and kept in `extra_options`, which the map chooser shows as checkboxes:
 
 | Name | What it does |
@@ -96,7 +94,7 @@ and kept in `extra_options`, which the map chooser shows as checkboxes:
 
 ### Higher resolution
 
-`-s N` (in both hosts) renders at 320·N x 200·N. Scale 1 is the original, byte for byte. At
+The render scale N (the chooser, the Esc menu; `-s N` in the test host) renders at 320·N x 200·N. Scale 1 is the original, byte for byte. At
 larger scales only the drawing changes; the game state is identical at any scale:
 
 - the screen, the clipping and the scanline tables grow with it (`render_scale`, `screen_w()`,
@@ -159,6 +157,7 @@ host/
   game_renderer.cpp the renderers to choose from; renderer_sw.cpp (the game's picture),
                 renderer_gl.cpp (the external library, built with GLR=1)
   launcher.cpp  map chooser (Dear ImGui) shown when no map is given
+  prefs.cpp     the chooser's preferences file (prefs.txt, "key: value" per line)
   voxel_preview.cpp  the chooser's preview: the map's terrain in voxel space
   pcx.cpp       PCX reader for the preview (separate from the game's)
   opl_sound.cpp the game's AdLib writes played through Nuked-OPL3 and SDL audio
@@ -300,7 +299,7 @@ Bug of the original that was **fixed**:
   the end of `data.bin`, the corrupted title was not even the same between builds. Now such a
   car looks for its lowest point as on a fresh press, and the jump works.
 
-Bug of the original that can be **fixed on request** (`-E fix-ice-bug`):
+Bug of the original that can be **fixed on request** (the `fix-ice-bug` option):
 
 - **Ice pillars**: an ice chip that lands lowers the heightmap cell under it by one
   (`particles_update`). The height is a byte, so at 0 it wraps around to 255, the highest
