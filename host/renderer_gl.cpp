@@ -17,6 +17,7 @@
 #include "game_renderer.hpp"
 #include "gui.hpp"
 #include "renderer_api.hpp"
+#include "vec3f.hpp"
 
 #ifdef TEREP2_GLR
     #include <SDL_opengl.h>
@@ -29,8 +30,8 @@
     // restarted when the car or the camera changes.
     struct CamFilter {
         bool ready;                 // false: start from the next sample
-        RzVertex pos;               // the reference vertex (camera_pt), in tiles
-        RzVertex fwd, up;           // where the internal camera looks, and its up
+        Vec3f pos;                  // the reference vertex (camera_pt), in tiles
+        Vec3f fwd, up;              // where the internal camera looks, and its up
 
         void step(Car &car, uint16_t camera_pt, int mode);     // one tick; mode: 1 F1, 2 F2
     };
@@ -65,15 +66,6 @@
         _v = (float)uv_.v * scale; \
     })
 
-    static inline RzVertex rz_cross(RzVertex a, RzVertex b)
-    {
-        RzVertex r;
-        r.x = a.y * b.z - a.z * b.y;
-        r.y = a.z * b.x - a.x * b.z;
-        r.z = a.x * b.y - a.y * b.x;
-        return r;
-    }
-
     extern int broke_some_ice;
 
     // How much of the way to the new sample the filters go each tick
@@ -83,36 +75,22 @@
     constexpr float CAM_FILTER_POS = 0.4f;
     constexpr float CAM_UP_BIAS_F2 = 0.6f;  // F2's up leans towards the sky
 
-    static RzVertex rz_toward(RzVertex s, RzVertex t, float k)
-    {
-        return { s.x + (t.x - s.x) * k, s.y + (t.y - s.y) * k, s.z + (t.z - s.z) * k };
-    }
-
     // b -> a, from the 16.16 positions (any unit: only directions are used)
-    static RzVertex rz_delta(const Pos &a, const Pos &b)
+    static Vec3f delta(const Pos &a, const Pos &b)
     {
         Vec3 d = a - b;
         return { (float)d.x, (float)d.y, (float)d.z };
     }
 
-    static RzVertex rz_add(RzVertex a, RzVertex b)
-    {
-        return { a.x + b.x, a.y + b.y, a.z + b.z };
-    }
-
-    static RzVertex rz_normalized(RzVertex v)
-    {
-        float l = sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
-        return l > 0 ? RzVertex{ v.x / l, v.y / l, v.z / l } : v;
-    }
-
     // A vertex of the game in the library's units (tiles), z kept off the
     // underflow (a car upside down in a low part of the map).
-    static RzVertex rz_point(const Pos &p)
+    static Vec3f tiles(const Pos &p)
     {
         auto z = p.z.raw < 0xfe000000 ? p.z.raw : 0;
         return { F_8_24(p.x.raw), F_8_24(p.y.raw), F_8_24(z) };
     }
+
+    static RzVertex rz(Vec3f v) { return { v.x, v.y, v.z }; }
 
 // rzCreateWindow makes an OpenGL context of its own on the host's window and
 // leaves it current, and rzDestroy deletes it.  The host (ImGui: the map
@@ -290,25 +268,25 @@ static void game_keys()
 void CamFilter::step(Car &car, uint16_t camera_pt, int mode)
 {
     const float k = mode == 2 ? CAM_FILTER_F2 : CAM_FILTER_F1;
-    RzVertex p = rz_point(car.points[camera_pt].pos);
+    Vec3f p = tiles(car.points[camera_pt].pos);
     // Car::axis_x and axis_y (physics.cpp) in float, from the exact
     // differences of the body vertices 4..7: to the right, and to the front
     // (axis_y, (4 - 6) + (5 - 7), points to the back: here it is reversed)
     const CarVertex *v = car.vertices();
-    RzVertex r = rz_normalized(rz_delta(v[7].pos, v[6].pos));
-    RzVertex f = rz_normalized(rz_add(rz_delta(v[6].pos, v[4].pos), rz_delta(v[7].pos, v[5].pos)));
-    RzVertex u = rz_cross(f, r);                        // unit-sized: the bias below is in those units
+    Vec3f r = delta(v[7].pos, v[6].pos).normalized();
+    Vec3f f = (delta(v[6].pos, v[4].pos) + delta(v[7].pos, v[5].pos)).normalized();
+    Vec3f u = f.cross(r);                               // unit-sized: the bias below is in those units
     if (mode == 2)
         u.z += CAM_UP_BIAS_F2;
-    u = rz_normalized(u);
+    u = u.normalized();
 
     if (!ready) {
         *this = { true, p, f, u };
         return;
     }
-    pos = rz_toward(pos, p, CAM_FILTER_POS);
-    fwd = rz_normalized(rz_toward(fwd, f, k));
-    up = rz_normalized(rz_toward(up, u, k));
+    pos = pos.toward(p, CAM_FILTER_POS);
+    fwd = fwd.toward(f, k).normalized();
+    up = up.toward(u, k).normalized();
 }
 #endif
 
@@ -344,8 +322,10 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         if(internalCamMode){
             // the filtered axes (opengl_tick) of the car the camera is on
             const CamFilter &c = cam_filter;
-            if (c.ready)
-                rzSetCameraInternalAxes(ctx, &c.fwd, &c.up);
+            if (c.ready) {
+                RzVertex f = rz(c.fwd), u = rz(c.up);
+                rzSetCameraInternalAxes(ctx, &f, &u);
+            }
         }
 
         rzRender(ctx);
@@ -385,12 +365,12 @@ static void updateCars(){
         RzVertex ptrs[n];
 
         for(int i =0; i< n; i++){
-            ptrs[i] = rz_point(car.points[i].pos);
+            ptrs[i] = rz(tiles(car.points[i].pos));
         }
         // the reference vertex (where the camera is): filtered, see opengl_tick;
         // most cars do not use it for any polygon
         if (internalCamMode && cam_filter.ready && ci == world.player_car[0])
-            ptrs[carros[ci].camera_pt] = cam_filter.pos;
+            ptrs[carros[ci].camera_pt] = rz(cam_filter.pos);
 
         //TODO review this constant, the limits are 45 deg
         float steering = (float)car.steer.raw * -0.0001f;
