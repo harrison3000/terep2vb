@@ -58,6 +58,15 @@
         ret; \
     })
 
+    static inline RzVertex rz_cross(RzVertex a, RzVertex b)
+    {
+        RzVertex r;
+        r.x = a.y * b.z - a.z * b.y;
+        r.y = a.z * b.x - a.x * b.z;
+        r.z = a.x * b.y - a.y * b.x;
+        return r;
+    }
+
     extern int broke_some_ice;
 
 // rzCreateWindow makes an OpenGL context of its own on the host's window and
@@ -244,7 +253,6 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         updateSprites();
         updateCamDists();
         if(internalCamMode){
-            //TODO implement/improve camera mode 2
             auto car = car_get(currTgt);
 
             auto x = car.axis_x();
@@ -253,7 +261,13 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
             auto f = F_RZVEC3(y, -1.0f);
             auto r = F_RZVEC3(x, 1.0f);
 
-            rzSetCameraInternalAxes(ctx, &f, &r);
+            auto up = rz_cross(f,r);
+            if(internalCamMode == 2){
+                //small bias up
+                up.z += 0.6f;
+            }
+            
+            rzSetCameraInternalAxes(ctx, &f, &up);
         }
 
         rzRender(ctx);
