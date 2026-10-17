@@ -7,6 +7,9 @@
  *
  * The calls into the library are marked LIB: they are compiled only with
  * the library (make sdl GLR=1 ...).  What else it will need: TODO-lib.md.
+ *
+ * This file has a surprising amount of human generated code and gambiarras :)
+ *
  */
 #include <cmath>
 #include <string>
@@ -238,14 +241,18 @@ static void game_keys()
     #ifdef TEREP2_GLR
     case 59:{ //F1: internal
         rzSetCamera(ctx, RZ_CAMERA_INTERNAL);
+        if(!internalCamMode){
+            cam_filter.ready = false;
+        }
         internalCamMode = 1;
-        cam_filter.ready = false;
         break;
     }
     case 60:{ //F2: internal2
         rzSetCamera(ctx, RZ_CAMERA_INTERNAL);
+        if(!internalCamMode){
+            cam_filter.ready = false;
+        }
         internalCamMode = 2;
-        cam_filter.ready = false;
         break;
     }
     case 61:{ //F3: freeze pos
