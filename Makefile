@@ -1,6 +1,8 @@
 # terep2 in C++ ("C with classes").
 #   make            headless test host, terep2-headless (no dependencies)
-#   make sdl        SDL2 version (needs SDL2 development files and the host/imgui submodule)
+#   make sdl        SDL2 version, with the OpenGL renderer (needs SDL2 development files, OpenGL,
+#                   EGL and the submodules: host/imgui, host/Nuked-OPL3, host/renderizeitor)
+#   make no_gl      the same without the OpenGL renderer (or make sdl NO_GL=1)
 #   make test       replay the Win16 recordings in tests/ and compare the frames
 #   make coverage   which lines of src/ the tests run (clang/LLVM); REPLAY="recdir mapdir": a recording's
 #   make -j8 ...    in parallel: every file is its own object in build/
@@ -36,10 +38,12 @@ GL_LIBS  := -lopengl32
 else
 GL_LIBS  := -lGL
 endif
-# The external OpenGL renderer (TODO-lib.md):
-#   make sdl GLR=1 GLR_DIR=its/include GLR_LIB="path/to/lib.a and what it needs"
-ifdef GLR
-GLR_FLAGS := -DTEREP2_GLR $(if $(GLR_DIR),-I$(GLR_DIR))
+# The OpenGL renderer: the renderizeitor library (submodule host/renderizeitor), built by its own
+# Makefile; NO_GL=1 leaves it out.
+RZ       := host/renderizeitor
+ifndef NO_GL
+GLR_FLAGS := -DTEREP2_GLR -Ihost
+GLR_LIB   := $(RZ)/librenderizeitor_static.a
 endif
 IMGUI    := host/imgui
 OPL3     := host/Nuked-OPL3
@@ -54,8 +58,12 @@ $(IMGUI)/imgui.h:
 	@echo "Dear ImGui is missing: git submodule update --init" >&2; false
 $(OPL3)/opl3.h:
 	@echo "Nuked-OPL3 is missing: git submodule update --init" >&2; false
+$(RZ)/Makefile:
+	@echo "renderizeitor is missing: git submodule update --init (or make no_gl)" >&2; false
+$(RZ)/librenderizeitor_static.a: $(RZ)/Makefile $(wildcard $(RZ)/src/* $(RZ)/src/shaders/* $(RZ)/include/*)
+	$(MAKE) -C $(RZ) lib
 
-# The SDL host's flags (GLR, GLR_DIR, GLR_LIB...), kept in a file that only changes when they
+# The SDL host's flags (with or without the OpenGL renderer...), kept in a file that only changes when they
 # do: changing them rebuilds what they touch, with no need to remove anything by hand.
 build/sdl/flags: FORCE | build/sdl
 	@echo '$(SDL_FLAGS) | $(GLR_LIB)' | cmp -s - $@ || echo '$(SDL_FLAGS) | $(GLR_LIB)' > $@
@@ -69,7 +77,9 @@ build/opl3.o: $(OPL3)/opl3.c | build $(OPL3)/opl3.h
 	$(CC) -O2 $(DEPFLAGS) -c -o $@ $<
 
 sdl: terep2vibed
-terep2vibed: $(GAME_OBJ) $(HOST_OBJ) $(SDL_OBJ) $(IMGUI_OBJ) build/opl3.o build/sdl/flags
+no_gl:
+	$(MAKE) sdl NO_GL=1
+terep2vibed: $(GAME_OBJ) $(HOST_OBJ) $(SDL_OBJ) $(IMGUI_OBJ) build/opl3.o build/sdl/flags $(GLR_LIB)
 	$(CXX) $(CXXFLAGS) -o $@ $(GAME_OBJ) $(HOST_OBJ) $(SDL_OBJ) $(IMGUI_OBJ) build/opl3.o \
 		$(GLR_LIB) $(shell sdl2-config --libs) $(GL_LIBS) -lm
 
@@ -117,4 +127,4 @@ clean:
 
 -include $(wildcard build/*/*.d build/*.d build/imgui/backends/*.d build/cov/*/*.d)
 
-.PHONY: all sdl test coverage clean FORCE
+.PHONY: all sdl no_gl test coverage clean FORCE

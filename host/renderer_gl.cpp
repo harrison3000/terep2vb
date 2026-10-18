@@ -6,7 +6,7 @@
  * sound, the keys that change the game (Tab, Q, [, ], F9) and the text.
  *
  * The calls into the library are marked LIB: they are compiled only with
- * the library (make sdl GLR=1 ...).  What else it will need: TODO-lib.md.
+ * the library (make sdl; not with make no_gl).  What else it will need: TODO-lib.md.
  *
  * This file has a surprising amount of human generated code and gambiarras :)
  *

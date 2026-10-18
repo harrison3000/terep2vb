@@ -191,7 +191,7 @@ bool Launcher::frame(std::string *map)
                 host->renderer = i;
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("%s%s", r.what, r.available ? "" : "\n(compiled without it: make sdl GLR=1 ...)");
+                ImGui::SetTooltip("%s%s", r.what, r.available ? "" : "\n(compiled without it: make no_gl)");
         }
         ImGui::EndCombo();
     }

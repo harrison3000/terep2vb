@@ -18,7 +18,8 @@ that corrupts the title) and a crash of the original that the port does not repr
 ```sh
 git submodule update --init   # Dear ImGui and Nuked-OPL3 (host/imgui, host/Nuked-OPL3), for terep2vibed
 make            # terep2-headless: test host, no dependencies
-make sdl        # terep2vibed: playable SDL2 + OpenGL 3.3 version (needs libsdl2-dev, OpenGL and the submodules)
+make sdl        # terep2vibed: playable SDL2 + OpenGL 3.3 version, with the OpenGL renderer (needs libsdl2-dev, OpenGL, EGL and the submodules)
+make no_gl      # the same, without the OpenGL renderer (software only)
 make test       # replays the Win16 recordings in tests/ and compares the frames
 make -j8 all sdl  # in parallel: each source is its own object in build/, rebuilt when its headers change
 make coverage  # which lines of src/ the tests run (clang/LLVM): summary, and build/cov/html
@@ -43,11 +44,10 @@ shape) and the minimap all go through Dear ImGui on it. An external OpenGL rende
 the same context; `host/renderer_api.hpp` gives it the context, the real paths of the map's files
 (`map_files()`) and the map's height and tile layers (`map_layers()`). The renderer is chosen in
 the map chooser ("Renderer"): `software` (the default, the game's own picture) or
-`opengl`, which is only there when the host is built with the library:
-
-    make sdl GLR=1 GLR_DIR=its/include GLR_LIB="path/to/its.a ..."
-
-(changing these variables rebuilds what they touch, nothing has to be removed). The library's calls go
+`opengl`, Harrison's renderizeitor library (the submodule `host/renderizeitor`), which
+`make sdl` builds with its own Makefile and links in. `make no_gl` (or `make sdl NO_GL=1`)
+builds the host without it, with only the software renderer; switching between the two rebuilds
+what changes, nothing has to be removed. The library's calls go
 in `host/renderer_gl.cpp`, at the lines marked `LIB:`; in that mode `game_frame()` is not called,
 so the host plays the engine sound and handles Tab, Q, `[`, `]` and F9 itself. What is still to do
 for it is in [TODO-lib.md](TODO-lib.md).
@@ -155,7 +155,7 @@ host/
   gui.cpp       its window: one OpenGL 3.3 core context, with ImGui (OpenGL3 backend) on it
   renderer_api.hpp  what an external OpenGL renderer gets: the context, the map's files and layers
   game_renderer.cpp the renderers to choose from; renderer_sw.cpp (the game's picture),
-                renderer_gl.cpp (the external library, built with GLR=1)
+                renderer_gl.cpp (the renderizeitor library, left out by make no_gl)
   launcher.cpp  map chooser (Dear ImGui) shown when no map is given
   prefs.cpp     the chooser's preferences file (prefs.txt, "key: value" per line)
   voxel_preview.cpp  the chooser's preview: the map's terrain in voxel space

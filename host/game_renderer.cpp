@@ -1,5 +1,5 @@
 // The list of renderers.  The OpenGL one is there only when the host is
-// built with the external library (make sdl GLR=1, see the Makefile).
+// built with the renderizeitor library (make sdl; make no_gl leaves it out).
 #include <cstring>
 #include "game_renderer.hpp"
 
