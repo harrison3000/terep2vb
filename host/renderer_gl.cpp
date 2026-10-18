@@ -424,9 +424,14 @@ static void loadCar(int i, std::string cpcx){
                 continue;
             }
 
-            if(color == 240){
-                //TODO handle all the different tones
-                rzAddObjectTranslucentPolygon(ctx, idCar, idxs, n, 8);
+            if(color >= 240){
+                int tone = color & 0xf;
+                if(color == 240){
+                    //special case, all the known cars use the 0 value
+                    //4..10 looked the nicest to me, but its a matter of taste
+                    tone = 6;
+                }
+                rzAddObjectTranslucentPolygon(ctx, idCar, idxs, n, tone);
             }else{
                 rzAddObjectPolygon(ctx, idCar, idxs, n, color);
             }
