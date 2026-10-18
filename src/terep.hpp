@@ -4,10 +4,10 @@
  * C++ reconstruction of the MS-DOS demo, from the disassembly in reasm/.
  * Original function addresses are kept in comments ("orig 1000:xxxx").
  *
- * Style: plain C++ ("C with classes").  The structures that live in the
- * data segment are packed PODs with exactly the original layout, because
- * the segment is a byte image addressed by 16-bit offsets; the cars are
- * ordinary structures read from their files.  Methods and operators are
+ * Style: plain C++ ("C with classes").  The game state is a few global
+ * structures, split by subject from the original's data segment; the cars
+ * are structures read from their files.
+ * Methods and operators are
  * used where they make the arithmetic readable; everything else stays as
  * free functions.
  */
@@ -72,19 +72,19 @@ struct Pos {
 };
 
 /* ---------------------------------------------------------------------------
- * Small structures that live inside the data segment
+ * Small structures (of the game state below)
  * ------------------------------------------------------------------------- */
 
-struct PACKED Angles {              /* an orientation, applied roll, pitch, yaw (see build_matrix) */
+struct Angles {              /* an orientation, applied roll, pitch, yaw (see build_matrix) */
     Angle roll, pitch, yaw;
 };
 
-struct PACKED ChaseCam {            /* state of the "follow" cameras (F3/F4/F5) */
+struct ChaseCam {            /* state of the "follow" cameras (F3/F4/F5) */
     Pos   pos;
     Angle yaw, pitch, roll;
 };
 
-struct PACKED Particle {            /* smoke puffs, sparks and ice chips */
+struct Particle {            /* smoke puffs, sparks and ice chips */
     Pos     pos;
     Vec3    vel;
     int16_t life;                   /* counts down by 2 per tick */
@@ -93,39 +93,53 @@ struct PACKED Particle {            /* smoke puffs, sparks and ice chips */
     static constexpr int16_t ICE_CHIP = 0x0f, DUST = 1;
 };
 
-struct PACKED ProjVertex {          /* a point transformed to camera space */
+struct ProjVertex {          /* a point transformed to camera space */
     int16_t x, y, z;                /* camera space: y is depth */
     int16_t sx, sy;                 /* screen position, valid when y >= near_clip */
 };
 
-struct PACKED PolyVertex {          /* polygon vertex fed to the rasterisers */
+/* A texture coordinate, 8.8 texels of a 256-wide texture (in the files, u
+ * then v, read by the original as one dword). */
+struct TexCoord {
+    uint16_t u, v;
+};
+
+/* The attributes of a polygon vertex: a shade (8.8 colour), or u and v. */
+struct VertexAttr {
+    uint16_t a = 0, b = 0;
+    VertexAttr() = default;
+    VertexAttr(uint16_t shade) : a(shade) {}
+    VertexAttr(TexCoord t) : a(t.u), b(t.v) {}
+};
+
+struct PolyVertex {          /* polygon vertex fed to the rasterisers */
     int16_t  sx, sy;
     uint16_t a, b;                  /* attributes: u/v (texture) or shade */
 };
 
 /* A polygon: vertex count followed by the vertices (the clippers write one
  * extra vertex past the last one while working). */
-struct PACKED PolyBuf {
+struct PolyBuf {
     uint16_t   count;
     PolyVertex v[10];
 };
 
-struct PACKED ScanEdge {
+struct ScanEdge {
     int16_t left, right;
 };
 
-struct PACKED Point2 {
+struct Point2 {
     int16_t x, y;
 };
 
-struct PACKED PointBuf {
+struct PointBuf {
     uint16_t count;
     Point2   v[10];
 };
 
-struct PACKED SpriteQuad {          /* camera-facing textured square (smoke; model opcode 9) */
+struct SpriteQuad {          /* camera-facing textured square (smoke; model opcode 9) */
     int16_t  size;                  /* half the side, before dividing by the depth */
-    uint32_t uv[4];                 /* corner texture coordinates, v << 16 | u */
+    TexCoord uv[4];                 /* corner texture coordinates */
 };
 
 struct PACKED PcxHeader {
@@ -140,7 +154,6 @@ struct PACKED PcxHeader {
     uint8_t  filler[58];
 };
 
-#include "dataseg.hpp"
 
 /* ---------------------------------------------------------------------------
  * Cars
@@ -148,8 +161,7 @@ struct PACKED PcxHeader {
  * A carN.dat file is a fixed header followed by three sections: the mass
  * points, the springs and the model (a small drawing program, see
  * car_draw.cpp).  The original copied the file into the data segment and
- * used it in place; here car_file.cpp reads it into a Car (the test host
- * writes the original bytes back to compare them, host_test/car_image.cpp).
+ * used it in place; here car_file.cpp reads it into a Car.
  * ------------------------------------------------------------------------- */
 
 enum ModelOpcode : uint8_t;         /* the opcodes (car_draw.cpp) */
@@ -159,12 +171,12 @@ enum ModelOpcode : uint8_t;         /* the opcodes (car_draw.cpp) */
  * in the list. */
 struct ModelOp {
     struct Vertex {                 /* a polygon corner */
-        uint16_t point;             /* index into G->car_proj */
-        uint32_t attr;              /* shade, car_uv_table index or v << 16 | u */
+        uint16_t point;             /* index into render.car_proj */
+        VertexAttr attr;            /* shade, shade_tab index (in a) or u, v */
     };
     struct WheelView {              /* one of the nine wheel sprites */
         int16_t  w0, w1;            /* half-axes */
-        uint32_t uv[4];
+        TexCoord uv[4];
     };
 
     ModelOpcode op;
@@ -195,12 +207,15 @@ struct CarSpring {
     uint16_t a, b;                  /* vertex indices */
     int16_t  rest;                  /* rest length (<0: take the current length) */
     int16_t  last;                  /* length on the previous tick */
-    uint16_t flags;                 /* low byte: type, bit 7: broken; high byte: softness shift */
+    uint8_t  type;                  /* LIMITS, ELASTIC, or a damper (rest pull / (type >> 1));
+                                     * | BROKEN (then always a damper) */
+    uint8_t  shift;                 /* the impulse >> shift + 1 goes to vertex a, the rest to b */
     uint16_t min_len, max_len;
 
-    uint8_t type() const { return (uint8_t)flags; }
-    int softness() const { return (uint8_t)((flags >> 8) + 1) & 31; }
+    int softness() const { return (uint8_t)(shift + 1) & 31; }
 };
+
+struct Hull;                        /* collision planes (physics.cpp) */
 
 struct Car {
     enum Drive : uint16_t { REAR = 0, FRONT = 1, ALL = 2 };
@@ -217,7 +232,7 @@ struct Car {
     Angle    steer_used = {};       /* steering/throttle latched for this tick */
     int16_t  throttle_used = 0;
     uint16_t cell = 0;              /* map cell the car is drawn with */
-    uint16_t texture_seg = 0;       /* car skin (0 = use textures.pcx) */
+    std::vector<uint8_t> skin;      /* carN.pcx, SEGMENT_SIZE bytes (empty: textures.pcx) */
     uint16_t ref_index = 0;         /* reference vertex (camera anchor) */
     int      lowest = -1;           /* vertex pushed by the "jump" keys, -1 before the first push */
     int32_t  wheel_speed[4] = {};   /* angular speed of each wheel */
@@ -236,8 +251,8 @@ struct Car {
     void update_wheels();
     void update_springs();
     void update_points();
-    void build_hull();
-    void push_points_of(Car &other);
+    void build_hull(Hull &h);
+    void push_points_of(const Hull &h, Car &other);
     void jump(bool keep_point);
 
 private:
@@ -262,42 +277,125 @@ constexpr size_t SPRING = 0x0e;     /* one CarSpring */
 constexpr size_t MAX_SIZE = 10000;  /* the original reads at most this much */
 }
 
-static_assert(sizeof(Particle) == 0x1c, "Particle");
 
 /* ---------------------------------------------------------------------------
  * Global state
  * ------------------------------------------------------------------------- */
 
-extern DataSeg *G;                  /* the data segment */
+constexpr int MAX_RENDER_SCALE = 8;     /* see "Resolution" below */
+
+/* The game state, split by subject from the original's data segment (the
+ * numbers are the original offsets, for reference).  state_reset() puts it
+ * back as at the start of the program. */
+
+/* The simulation: what physics_tick and the keys change (game.cpp). */
+struct World {
+    int32_t gravity;                         /* 006a: added to every vertex's vz each tick ([ and ] change it) */
+    uint8_t sim_running;                     /* 006e: set to 1 once loading succeeded */
+    int16_t num_cars;                        /* 5bba */
+    uint8_t split_screen;                    /* 007d: F9 */
+    uint16_t player_car[2];                  /* 00a4: car index followed by each view (Tab / Q) */
+    int16_t spring_break_stretch;            /* e9e2: sim.cfg */
+    int16_t spring_break_squash;             /* e9e4 */
+    uint16_t particle_count;                 /* 3e51: live particles (the original counted bytes) */
+    Particle particles[200];                 /* 3e53 */
+};
+extern World world;
+
+/* The cameras and the view they give (camera.cpp). */
+struct Camera {
+    uint8_t cam_mode[2];                     /* 007e: per player view, 0..4 (F1..F5 / F6) */
+    ChaseCam chase_cam[2];                   /* 0080: free-floating camera state, one per player */
+    Pos eye;                                 /* 00aa: camera position (16.16) */
+    Angles eye_angles;                       /* 00c2: orientation of the camera */
+    Q15 view_matrix[9];                      /* 00ce: rotation, world -> camera */
+    int16_t chase_height;                    /* 011c: numpad +/- */
+    int16_t chase_distance;                  /* 011e: numpad / and * */
+    int16_t yaw_sin7;                        /* 05f7: sin(yaw) >> 7 */
+    int16_t yaw_cos7;                        /* 05f9: cos(yaw) >> 7 */
+};
+extern Camera camera;
+
+/* The renderer's settings and working state (raster.cpp, scene.cpp, car_draw.cpp). */
+struct Render {
+    int16_t near_clip;                       /* 0120: points closer than this are not projected */
+    int16_t fog_start;                       /* 05f5: terrain farther than this is flat-shaded (F10 toggles) */
+    int16_t screen_cx;                       /* dbb8: projection centre */
+    int16_t screen_cy;                       /* dbba */
+    int16_t clip_top;                        /* dbbc */
+    int16_t clip_bottom;                     /* dbbe */
+    int16_t clip_left;                       /* dbc0 */
+    int16_t clip_right;                      /* dbc2 */
+    PolyBuf poly_buf[2];                     /* db14: [0] polygon being drawn, [1] scratch for clipping */
+    ProjVertex car_proj[120];                /* 0126: car vertices transformed to camera space (the last 20 were car_uv_table) */
+    uint8_t terrain_swap_xy;                 /* 05fb: terrain is traversed column-major */
+    PointBuf vis_buf[2];                     /* e530: visible-terrain hexagon in map cells, [1] = clipping scratch */
+    int16_t vis_row_first;                   /* e58c: first map row with visible cells */
+    int16_t vis_row_last;                    /* e58e */
+    ScanEdge vis_span[256];                  /* e590: first/last visible column of every map row */
+    struct {                                 /* e990: near-plane clipper, the previous point */
+        int16_t x, dist, z;
+        uint16_t count;
+    } near_prev;
+    /* scanline tables, tall enough for every scale (dbc8, dee8, e208 at 1x) */
+    ScanEdge span_x[200 * MAX_RENDER_SCALE], span_a[200 * MAX_RENDER_SCALE], span_b[200 * MAX_RENDER_SCALE];
+};
+extern Render render;
+
+/* Read from the map's files by game_init (load.cpp). */
+struct MapTables {
+    uint8_t palette[768];                    /* 1a4d */
+    uint8_t fog_table[17][256];              /* 1d51: [distance/256][colour] -> colour */
+    uint8_t shade_table[16][256];            /* 2e51: [level][colour] -> colour (translucency) */
+};
+extern MapTables map_tables;
+
+/* The last ground contact (physics.cpp).  Not only scratch: the particles
+ * that a car-vs-car push spawns take their velocity from the contact frame
+ * and slide of the last vertex that touched the ground, maybe ticks ago. */
+struct Contact {
+    int32_t ground_n1[2];                    /* e9a0: contact frame (Q31 sin/cos pairs, low word 0) */
+    int32_t ground_n2[2];                    /* e9a8 */
+    uint8_t surface;                         /* ea28: colour-map byte under the point (0: a wall, a car) */
+    int32_t penetration;                     /* e9c8: velocity into the ground (negative) */
+    int32_t slide[2];                        /* e9cc: tangential velocity in the contact frame */
+    int32_t slip_sin, slip_cos;              /* e9be, e9c2: wheel heading in the contact plane */
+    int32_t wheel_speed;                     /* e9da */
+};
+extern Contact contact;
+
 extern uint8_t keys[128];           /* [0] = last scancode, [sc] bit 7 clear while held */
 
-/* "Segments": 64 KB blocks allocated at load time and referred to by a
- * 16-bit handle, exactly like the original's DOS memory blocks. */
-uint8_t *seg_ptr(uint16_t handle);
-int      seg_alloc(uint16_t paragraphs, uint16_t *handle);
+/* The original's other 64 KB segments, allocated by game_init: indexed
+ * with 16-bit offsets, which wrap around inside them like the original's.
+ * The hires screen (render_scale > 1) is 320*s x 200*s. */
+constexpr size_t SEGMENT_SIZE = 0x10000;
+struct Segments {
+    std::vector<uint8_t> heightmap, colormap;   /* 256 x 256 map layers */
+    std::vector<uint8_t> textures, maptex;      /* textures.pcx, maptex.pcx */
+    std::vector<uint8_t> screen, hires_screen;
+};
+extern Segments segments;
 
-inline uint8_t *ds_ptr(uint16_t ofs) { return reinterpret_cast<uint8_t *>(G) + ofs; }
-inline uint16_t ds_ofs(const void *p) { return (uint16_t)(static_cast<const uint8_t *>(p) - reinterpret_cast<const uint8_t *>(G)); }
 
-extern Car cars[10];                /* G->num_cars of them are loaded */
+constexpr int MAX_CARS = 5;
+extern Car cars[MAX_CARS];          /* world.num_cars of them are loaded */
 inline Car &car_get(int i) { return cars[i]; }
 
 /* Map layers.  Indexing with a uint16_t (x | y << 8) wraps around exactly
  * like the original's 16-bit offsets. */
-inline uint8_t *heightmap() { return seg_ptr(G->seg_heightmap); }
-inline uint8_t *colormap()  { return seg_ptr(G->seg_colormap); }
+inline uint8_t *heightmap() { return segments.heightmap.data(); }
+inline uint8_t *colormap()  { return segments.colormap.data(); }
 
 /* Resolution.  render_scale 1 is the original 320x200 in the original's
  * screen segment, rendered exactly like the original.  Larger scales draw
- * into hires_screen (320*s x 200*s) and project with the fractional bits
+ * into segments.hires_screen (320*s x 200*s) and project with the fractional bits
  * of the positions, so the picture does not shake (see view_transform).
  * The game state is the same at any scale. */
-constexpr int MAX_RENDER_SCALE = 8;
 extern int      render_scale;           /* set by the host before game_init */
-extern uint8_t *hires_screen;
 inline int      screen_w() { return 320 * render_scale; }
 inline int      screen_h() { return 200 * render_scale; }
-inline uint8_t *screen()   { return render_scale > 1 ? hires_screen : seg_ptr(G->seg_screen); }
+inline uint8_t *screen()   { return (render_scale > 1 ? segments.hires_screen : segments.screen).data(); }
 /* A scaled screen coordinate, kept where 16-bit differences of two of them
  * cannot overflow (at scale 1 the original's 16-bit wraparound stays). */
 inline int16_t screen_clamp(int32_t v)
@@ -344,7 +442,13 @@ void     transpose(Q15 m[9]);
 
 /* terrain.cpp */
 int16_t  terrain_height(uint16_t x, uint16_t y);
-int16_t  ground_probe(uint16_t x, uint16_t y);
+/* What the physics needs about the ground under a point. */
+struct Ground {
+    int16_t height;
+    int16_t slope_x, slope_y;       /* height deltas along x and y over a cell */
+    uint8_t surface;                /* colour-map byte */
+};
+Ground   ground_probe(uint16_t x, uint16_t y);
 
 /* physics.cpp */
 void     physics_tick();
@@ -354,11 +458,11 @@ void     clear_screen();
 void     put_pixel(int16_t x, int16_t y, uint8_t color);
 void     put_block(int16_t x, int16_t y, uint8_t color);    /* render_scale x render_scale pixels */
 int16_t  edge_lerp(int16_t da, int16_t va, int16_t db, int16_t vb);
-void     poly_begin(const ProjVertex &p, uint32_t attr);
-void     poly_add(const ProjVertex &p, uint32_t attr);
-uint16_t poly_end(const ProjVertex &p, uint32_t attr);
+void     poly_begin(const ProjVertex &p, VertexAttr attr);
+void     poly_add(const ProjVertex &p, VertexAttr attr);
+uint16_t poly_end(const ProjVertex &p, VertexAttr attr);
 bool     poly_backfacing();
-void     draw_flat();
+void     draw_flat(uint16_t color);      /* two bytes: a dither pattern, >= 0xf0f0 translucent */
 void     draw_shaded();
 void     draw_textured(const uint8_t *tex);     /* tex: the original's FS segment */
 
@@ -366,6 +470,7 @@ void     draw_textured(const uint8_t *tex);     /* tex: the original's FS segmen
 extern bool poly_hidden;                /* result of the last facing test */
 bool     view_transform(int16_t x, int16_t y, int16_t z, ProjVertex *out);
 bool     view_transform_fine(Vec3 d, ProjVertex *out);  /* d: 16.16 map units from the eye */
+extern const uint8_t smoke_quad_of_kind[16];   /* smoke quad (0..3) of each particle kind >> 4 */
 void     draw_sprite(int16_t sx, int16_t sy, int16_t depth, const SpriteQuad &q, const uint8_t *tex);
 void     draw_terrain();
 void     draw_particles();
@@ -377,21 +482,34 @@ void     draw_car(Car &car);
 /* camera.cpp */
 void     camera_update(int view);
 
-/* dataseg_init.cpp */
-void     dataseg_init();                /* fill *G with the original's initial contents */
+/* state.cpp */
+void     state_reset();                 /* the global state as at the start of the program */
 
 /* text.cpp */
 void     draw_text(const char *s, int16_t x, int16_t y, uint8_t color);
+const uint8_t *font_glyph(uint8_t c);   /* columns (bit 0 = top row), ended by 0 */
 
 /* car_file.cpp */
 uint16_t car_read(Car &car, FILE *f);
 
-/* load.cpp */
+/* load.cpp: the map's files */
+inline constexpr char fname_map[] = "map.pcx";              /* heightmap */
+inline constexpr char fname_col[] = "col.pcx";              /* terrain colour + palette */
+inline constexpr char fname_textures[] = "textures.pcx";    /* generic textures (smoke, default car skin) */
+inline constexpr char fname_maptex[] = "maptex.pcx";        /* near-terrain textures */
+inline constexpr char fname_fog[] = "fog.dat";              /* distance fog lookup */
+inline constexpr char fname_smoke[] = "smoke.dat";          /* translucency lookup */
+inline constexpr char fname_cfg[] = "sim.cfg";              /* optional spring limits */
+const char *car_dat_name(int i);        /* "car1.dat".."car5.dat" */
+const char *car_pcx_name(int i);
 FILE    *data_fopen(const char *name);  /* provided by the host: open a track file for reading */
 
 /* game.cpp */
+extern const char title_text[], subtitle_text[];
 void     game_frame_reset();
 int      game_init();                   /* also to start again (new track): the host makes a new G first */
+void     game_free();
+void     game_set_scale(int scale);     /* during a game: the state does not depend on it */                   /* the segments and the cars, before freeing G */
 int      game_frame();
 void     game_key(uint8_t scancode);
 

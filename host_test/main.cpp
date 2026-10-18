@@ -1,93 +1,26 @@
 /*
- * Test host (headless): runs the game for a number of frames with a
- * scripted keyboard and prints, per frame, a CRC of the frame buffer and
- * of the data segment (scratch variables masked), in the same format as
- * tools/oracle so the outputs can be compared directly.  The cars are
- * written back into the segment first (car_image.cpp), where the original
- * keeps them.
+ * Test host (headless): replays recordings made with the Win16 port and
+ * compares the frames (replay() below).
  *
- *   terep2-headless [-s scale] [-E option]... [-p map:frames] mapdir frames [script] [ppmdir]
+ *   terep2-headless [-s scale] [-E option]... -R|-C recdir mapdir
  *
- * -E option, --extra-options option: turn on an extra option (see extra_option_list),
- * such as a fix of a bug of the original, or "all".
- *
- * -p map:frames: first play that many frames of the script on another
- * map (without output), then free everything and start the real run in
- * the same process; it must give the same output as a fresh process.
- * script: comma separated frame:scancode pairs (scancode | 0x80 = release)
- * ppmdir: write each frame as fNNNN.ppm there (only frame n with DUMP_FRAME=n)
- *
- *   terep2-headless [-E option]... -R recdir mapdir
- *   terep2-headless [-E option]... -C recdir mapdir
- *
- * -R: replay a recording made with the Win16 port, at 1x (replay() below).
- * -C: the same, only comparing (no name_new.pgm written).
+ * -R: replay recdir/record.txt on mapdir, at 1x, writing the frames it
+ * names as name_new.pgm; -C: the same, only comparing.
+ * -s scale: render at that scale; the frames are compared by similarity
+ * (block_difference) and the hashes with the port's own (hashes_Nx.txt).
+ * -E option, --extra-options option: turn on an extra option (see
+ * extra_option_list), such as a fix of a bug of the original, or "all".
  */
 #include <algorithm>
 #include <climits>
 #include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <string_view>
 #include <unistd.h>
 #include <vector>
 #include "../host/host.hpp"
-#include "car_image.hpp"
-#include "dsmask.h"
-
-/* The data segment as the original has it: with the cars in car_pool. */
-static const uint8_t *dataseg_image()
-{
-    static uint8_t image[0x10000];
-    memcpy(image, G, sizeof image);
-    cars_to_dataseg(image);
-    return image;
-}
-
-static void write_ppm(const char *path)
-{
-    FILE *f = fopen(path, "wb");
-    if (!f) {
-        perror(path);
-        return;
-    }
-    fprintf(f, "P6 %d %d 255\n", screen_w(), screen_h());
-    const uint8_t *scr = screen();
-    for (int i = 0; i < screen_w() * screen_h(); i++)
-        fwrite(host_palette(scr[i]), 1, 3, f);
-    fclose(f);
-}
-
-// The keys of the script for frame fr.
-static void script_keys(const char *script, int fr)
-{
-    for (const char *s = script; *s;) {
-        int f, sc, used;
-        if (sscanf(s, "%d:%i%n", &f, &sc, &used) != 2)
-            break;
-        if (f == fr)
-            game_key((uint8_t)sc);
-        s += used;
-        while (*s == ',')
-            s++;
-    }
-}
-
-// A game on map, from a new data segment; the current directory is restored.
-static bool start_game(const char *map)
-{
-    char here[PATH_MAX];
-    if (!getcwd(here, sizeof here) || !host_init_dataseg())
-        return false;
-    if (chdir(map) != 0) {
-        perror(map);
-        return false;
-    }
-    bool ok = game_init() == 0 && car_files_read();
-    if (!ok)
-        fprintf(stderr, "init failed\n");
-    return chdir(here) == 0 && ok;
-}
 
 // A PGM (P5, 320 x 200) from the recording; false if it cannot be read.
 static bool read_pgm(const char *path, std::vector<uint8_t> *pixels)
@@ -112,13 +45,47 @@ static bool read_pgm(const char *path, std::vector<uint8_t> *pixels)
     return ok;
 }
 
-// FNV-1a, 64 bits, of the frame buffer (320 x 200).
-static uint64_t frame_fnv1a_64(const uint8_t *scr)
+// FNV-1a, 64 bits.
+static uint64_t fnv1a_64(const uint8_t *p, size_t n)
 {
     uint64_t h = 0xcbf29ce484222325;
-    for (int i = 0; i < 320 * 200; i++)
-        h = (h ^ scr[i]) * 0x100000001b3;
+    for (size_t i = 0; i < n; i++)
+        h = (h ^ p[i]) * 0x100000001b3;
     return h;
+}
+
+/* How far a frame at a higher scale is from the original's 1x frame orig:
+ * the average colour of each 8 x 8 block (in 1x pixels), compared channel by
+ * channel; the mean of the largest channel difference of every block.  The
+ * finer projection moves edges and texels by less than a pixel, which this
+ * mostly ignores: 1 to 10 for the same picture (a camera grazing the
+ * ground changes the most), over 30 for another. */
+constexpr double SIMILAR_MAX = 15;
+static double block_difference(const uint8_t *orig)
+{
+    const int s = render_scale, B = 8;
+    double total = 0;
+    for (int by = 0; by < 200; by += B)
+        for (int bx = 0; bx < 320; bx += B) {
+            double a[3] = {}, b[3] = {};
+            for (int y = by; y < by + B; y++)
+                for (int x = bx; x < bx + B; x++) {
+                    const uint8_t *o = host_palette(orig[y * 320 + x]);
+                    for (int c = 0; c < 3; c++)
+                        a[c] += o[c] * (double)s * s;
+                    for (int yy = y * s; yy < (y + 1) * s; yy++)
+                        for (int xx = x * s; xx < (x + 1) * s; xx++) {
+                            const uint8_t *m = host_palette(screen()[yy * screen_w() + xx]);
+                            for (int c = 0; c < 3; c++)
+                                b[c] += m[c];
+                        }
+                }
+            double worst = 0;
+            for (int c = 0; c < 3; c++)
+                worst = std::max(worst, std::abs(a[c] - b[c]) / (B * B * s * s));
+            total += worst;
+        }
+    return total / ((320 / B) * (200 / B));
 }
 
 // Writes the frame buffer as recdir/name_new.pgm (P5, as the port does).
@@ -132,15 +99,15 @@ static void save_frame(const char *dir, const char *name, int renders)
         perror(mine.c_str());
         return;
     }
-    fprintf(out, "P5\n#frame %d\n320 200\n255\n", renders);
-    fwrite(screen(), 1, 320 * 200, out);
+    fprintf(out, "P5\n#frame %d\n%d %d\n255\n", renders, screen_w(), screen_h());
+    fwrite(screen(), 1, (size_t)screen_w() * screen_h(), out);
     fclose(out);
 }
 
 /* Replays recdir/record.txt, written by the Win16 port, on mapdir: one
  * action per line, told apart by its first letter, called exactly as recorded:
  *   (empty), # ...     nothing; the only lines allowed before the first init
- *   init               new data segment, game_init in mapdir
+ *   init               fresh state (host_init_state), game_init in mapdir
  *   P                  physics_tick
  *   R                  game_frame
  *   K: 0xcd            game_key (scancode, | 0x80 = released)
@@ -149,7 +116,7 @@ static void save_frame(const char *dir, const char *name, int renders)
  *   frame_fnv1a_64: 0xcb3dbe0bb5f1a8b3
  *                      compares the frame buffer's FNV-1a hash with that one
  * Returns 0 if every frame matched, 1 if not (or on errors). */
-static int replay(const char *rec, const char *mapdir, bool save)
+static int replay(const char *rec, const char *mapdir, bool save, int scale)
 {
     char dir[PATH_MAX], map[PATH_MAX];       // absolute: init changes to the map's directory
     if (!realpath(rec, dir) || !realpath(mapdir, map)) {
@@ -162,7 +129,17 @@ static int replay(const char *rec, const char *mapdir, bool save)
         perror(record.c_str());
         return 1;
     }
-    render_scale = 1;                       // the original's frame buffer
+    render_scale = scale;                   // 1: the original's frame buffer
+    /* At higher scales the recorded hashes (of 1x frames) do not apply: the
+     * port's own, in recdir/hashes_Nx.txt, are written there (-R) or compared
+     * with it (-C, if it exists), one per frame_fnv1a_64 line. */
+    FILE *hashes = nullptr;
+    if (scale > 1) {
+        std::string hp = std::string(dir) + "/hashes_" + std::to_string(scale) + "x.txt";
+        hashes = fopen(hp.c_str(), save ? "w" : "r");
+        if (!hashes && save)
+            perror(hp.c_str());
+    }
     int renders = 0, same = 0, differ = 0, missing = 0, line_no = 0;
     std::string first_diff;
     bool started = false;
@@ -178,7 +155,7 @@ static int replay(const char *rec, const char *mapdir, bool save)
         if (*line == 'i') {                 // init
             if (started)
                 host_free_game();
-            if (!host_init_dataseg() || chdir(map) != 0 || game_init() != 0) {
+            if (!host_init_state() || chdir(map) != 0 || game_init() != 0) {
                 fprintf(stderr, "%s: init failed\n", map);
                 return 1;
             }
@@ -197,7 +174,26 @@ static int replay(const char *rec, const char *mapdir, bool save)
         } else if (sscanf(line, "K: %x", &key) == 1) {
             game_key((uint8_t)key);
         } else if (sscanf(line, "frame_fnv1a_64: %llx", &hash) == 1) {
-            uint64_t mine = frame_fnv1a_64(screen());
+            if (scale > 1) {
+                uint64_t mine = fnv1a_64(screen(), (size_t)screen_w() * screen_h());
+                unsigned long long saved;
+                if (!hashes)
+                    continue;
+                if (save) {
+                    fprintf(hashes, "0x%016llx\n", (unsigned long long)mine);
+                    continue;
+                }
+                if (fscanf(hashes, "%llx", &saved) == 1 && saved == mine) {
+                    same++;
+                    continue;
+                }
+                printf("record.txt:%d, after %d renders: fnv1a 0x%016llx, saved 0x%016llx\n", line_no, renders,
+                       (unsigned long long)mine, saved);
+                if (!differ++)
+                    first_diff = "at record.txt:" + std::to_string(line_no);
+                continue;
+            }
+            uint64_t mine = fnv1a_64(screen(), 320 * 200);
             if (mine == hash) {
                 same++;
                 continue;
@@ -214,6 +210,16 @@ static int replay(const char *rec, const char *mapdir, bool save)
             if (!read_pgm((std::string(dir) + "/" + name).c_str(), &orig)) {
                 printf("%s: original missing or unreadable\n", name);
                 missing++;
+                continue;
+            }
+            if (scale > 1) {
+                double d = block_difference(orig.data());
+                bool ok = d <= SIMILAR_MAX;
+                printf("%s: %s (block difference %.1f)\n", name, ok ? "similar" : "NOT SIMILAR", d);
+                if (ok)
+                    same++;
+                else if (!differ++)
+                    first_diff = name;
                 continue;
             }
             int diff = 0, x0 = 320, y0 = 200, x1 = -1, y1 = -1;
@@ -238,6 +244,8 @@ static int replay(const char *rec, const char *mapdir, bool save)
         }
     }
     fclose(in);
+    if (hashes)
+        fclose(hashes);
     printf("%d frames: %d same, %d differ%s%s, %d without original\n", same + differ + missing, same, differ,
            differ ? ", first " : "", first_diff.c_str(), missing);
     return differ || missing ? 1 : 0;
@@ -246,78 +254,29 @@ static int replay(const char *rec, const char *mapdir, bool save)
 int main(int argc, char **argv)
 {
     int a = 1;
-    const char *pre = nullptr, *rec = nullptr;
+    const char *rec = nullptr;
     bool save = true;
+    int scale = 1;
     for (; a + 1 < argc && argv[a][0] == '-'; a += 2) {
         std::string_view opt = argv[a];
-        if (opt == "-s")
-            render_scale = atoi(argv[a + 1]);
-        else if (opt == "-p")
-            pre = argv[a + 1];
-        else if (opt == "-R" || opt == "-C") {
+        if (opt == "-R" || opt == "-C") {
             rec = argv[a + 1];
             save = opt == "-R";
-        }
-        else if ((opt == "-E" || opt == "--extra-options") && !extra_option_enable(argv[a + 1])) {
+        } else if (opt == "-s") {
+            scale = atoi(argv[a + 1]);
+        } else if (opt != "-E" && opt != "--extra-options") {
+            break;
+        } else if (!extra_option_enable(argv[a + 1])) {
             fprintf(stderr, "unknown option %s; known:", argv[a + 1]);
             for (int i = 0; i < extra_option_count; i++)
                 fprintf(stderr, " %s", extra_option_list[i].name);
             fprintf(stderr, " all\n");
             return 2;
-        } else if (opt != "-E" && opt != "--extra-options" && opt != "-p" && opt != "-R" &&
-                   opt != "-C")
-            break;
-    }
-    if (rec) {
-        if (argc - a != 1) {
-            fprintf(stderr, "usage: %s [-E option]... -R|-C recdir mapdir\n", argv[0]);
-            return 2;
         }
-        return replay(rec, argv[a], save);
     }
-    if (argc - a < 2 || render_scale < 1 || render_scale > MAX_RENDER_SCALE) {
-        fprintf(stderr, "usage: %s [-s 1..%d] [-E option]... [-p map:frames] mapdir frames [script] [ppmdir]\n"
-                        "       %s [-E option]... -R|-C recdir mapdir\n",
-                argv[0], MAX_RENDER_SCALE, argv[0]);
+    if (!rec || argc - a != 1 || scale < 1 || scale > MAX_RENDER_SCALE) {
+        fprintf(stderr, "usage: %s [-s 1..%d] [-E option]... -R|-C recdir mapdir\n", argv[0], MAX_RENDER_SCALE);
         return 2;
     }
-    const char *map = argv[a], *script = argc - a > 2 ? argv[a + 2] : "";
-    int frames = atoi(argv[a + 1]);
-    char ppmdir[PATH_MAX] = "";
-    if (argc - a > 3 && !realpath(argv[a + 3], ppmdir)) {
-        perror(argv[a + 3]);
-        return 1;
-    }
-
-    if (pre) {
-        std::string pre_map(pre, strcspn(pre, ":"));
-        int pre_frames = strchr(pre, ':') ? atoi(strchr(pre, ':') + 1) : 0;
-        if (!start_game(pre_map.c_str()))
-            return 1;
-        for (int fr = 0; fr < pre_frames; fr++) {
-            script_keys(script, fr);
-            host_step();
-        }
-        host_free_game();
-    }
-
-    if (!start_game(map))
-        return 1;
-    if (chdir(map) != 0)              // the map's files stay at hand, as before
-        return 1;
-    printf("cars=%d\n", G->num_cars);
-
-    // DUMP_FRAME=n: write only that frame's image
-    int only = getenv("DUMP_FRAME") ? atoi(getenv("DUMP_FRAME")) : -1;
-    for (int fr = 0; fr < frames; fr++) {
-        script_keys(script, fr);
-        host_step();                    // Esc is ignored here
-        printf("%d %08lx %08lx\n", fr, crc32_buf(screen(), (size_t)screen_w() * screen_h()), ds_masked_crc(dataseg_image()));
-        if (*ppmdir && (only < 0 || only == fr)) {
-            char fn[PATH_MAX + 16];
-            snprintf(fn, sizeof fn, "%s/f%04d.ppm", ppmdir, fr);
-            write_ppm(fn);
-        }
-    }
-    return 0;
+    return replay(rec, argv[a], save, scale);
 }

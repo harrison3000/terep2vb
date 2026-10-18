@@ -4,7 +4,7 @@
  * small bytecode program stored in the car file, draws polygons using
  * those points.
  *
- * Projected points, in G->car_proj:
+ * Projected points, in render.car_proj:
  *   [2i]     vertex i
  *   [2i + 1] the ground under vertex i
  *   [2n]     vertex 0 moved along the steered front axle
@@ -13,9 +13,12 @@
 #include <map>
 #include "terep.hpp"
 
+/* cos of the borders between the nine wheel sprites (22.5 deg apart), Q14 */
+static const int16_t wheel_sector_limits[8] = { -16069, -13623, -9102, -3196, 3196, 9102, 13623, 16069 };
+
 static void transform_point(Pos p, ProjVertex *out)
 {
-    view_transform_fine(p - G->eye, out);
+    view_transform_fine(p - camera.eye, out);
 }
 
 /* Half of the front axle, turned by the steering angle (16.16, length
@@ -33,7 +36,7 @@ static void transform_car(Car &car)
 {
     CarVertex *v = car.vertices();
     uint16_t n = car.vertex_count();
-    ProjVertex *out = G->car_proj;
+    ProjVertex *out = render.car_proj;
 
     for (uint16_t i = 0; i < n; i++) {
         Pos p = v[i].pos;
@@ -94,17 +97,17 @@ struct Decoder {
      * the car in the data segment). */
     uint8_t  rd8(uint32_t pc) const { return pc < code.size() ? code[pc] : 0; }
     uint16_t rd16(uint32_t pc) const { return (uint16_t)(rd8(pc) | rd8(pc + 1) << 8); }
-    uint32_t rd32(uint32_t pc) const { return rd16(pc) | (uint32_t)rd16(pc + 2) << 16; }
+    TexCoord rd_uv(uint32_t pc) const { return { rd16(pc), rd16(pc + 2) }; }
 
     /* The n + 1 corners of a polygon at pc; attr_size: 0, 2 or 4 bytes. */
     void outline(ModelOp &o, uint32_t pc, uint8_t n, int attr_size) const
     {
         for (int i = 0; i <= n; i++, pc += 2 + attr_size) {
-            ModelOp::Vertex v = { rd16(pc), 0 };
+            ModelOp::Vertex v = { rd16(pc), {} };
             if (attr_size == 2)
                 v.attr = rd16(pc + 2);
             else if (attr_size == 4)
-                v.attr = rd32(pc + 2);
+                v.attr = rd_uv(pc + 2);
             o.outline.push_back(v);
         }
     }
@@ -149,7 +152,7 @@ struct Decoder {
             o.p[0] = rd16(pc);
             o.sprite.size = (int16_t)rd16(pc + 2);
             for (int i = 0; i < 4; i++)
-                o.sprite.uv[i] = rd32(pc + 4 + 4 * i);
+                o.sprite.uv[i] = rd_uv(pc + 4 + 4 * i);
             return 21;
         case OP_WHEEL:
             o.p[0] = rd16(pc);
@@ -158,7 +161,7 @@ struct Decoder {
                 uint32_t sp = pc + 6 + v * 20;
                 ModelOp::WheelView w = { (int16_t)rd16(sp), (int16_t)rd16(sp + 2), {} };
                 for (int i = 0; i < 4; i++)
-                    w.uv[i] = rd32(sp + 4 + 4 * i);
+                    w.uv[i] = rd_uv(sp + 4 + 4 * i);
                 o.views.push_back(w);
             }
             return 1 + 0xba;
@@ -230,9 +233,30 @@ std::vector<ModelOp> model_decode(const std::vector<uint8_t> &code)
  * Running the decoded model
  * ---------------------------------------------------------------------- */
 
-static const ProjVertex &point(uint16_t i) { return *reinterpret_cast<const ProjVertex *>(ds_ptr((uint16_t)(offsetof(DataSeg, car_proj) + i * sizeof(ProjVertex)))); }
+/* Projected point i; the original read any point index from the data
+ * segment, here those past car_proj give a point at the origin. */
+static const ProjVertex &point(uint16_t i)
+{
+    static const ProjVertex none = {};
+    return i < sizeof render.car_proj / sizeof render.car_proj[0] ? render.car_proj[i] : none;
+}
 
-static uint16_t ds_word(uint16_t ofs) { return (uint16_t)(*ds_ptr(ofs) | *ds_ptr((uint16_t)(ofs + 1)) << 8); }
+/* The shade table of OP_SHADED_TAB: the word at byte idx of what was
+ * car_uv_table in the original, the 0xc8 bytes after the first 100
+ * projected points (never written there by the demo's cars, which have
+ * fewer than 50 vertices); the original read past it, here that is 0. */
+static uint16_t shade_tab(uint16_t idx)
+{
+    const ProjVertex *table = &render.car_proj[100];
+    const int16_t *words = &table[0].x;     /* ProjVertex is five int16_t */
+    if ((uint32_t)idx + 1 >= 20 * sizeof(ProjVertex))
+        return 0;
+    if (idx & 1) {                          /* an odd byte offset: two halves */
+        uint16_t lo = (uint16_t)words[idx / 2], hi = (uint16_t)words[idx / 2 + 1];
+        return (uint16_t)(lo >> 8 | hi << 8);
+    }
+    return (uint16_t)words[idx / 2];
+}
 
 /* Feeds the outline of a polygon to the clipper.  Returns the number of
  * points that survived the near plane. */
@@ -242,14 +266,11 @@ static uint16_t draw_outline(const ModelOp &o)
     uint16_t count = 0;
     for (size_t i = 0; i <= n; i++) {
         const ProjVertex &p = point(o.outline[i].point);
-        uint32_t attr = o.outline[i].attr;
+        VertexAttr attr = o.outline[i].attr;
         if (o.op == OP_FLAT)
-            attr = 0;
+            attr = {};
         else if (o.op == OP_SHADED_TAB)
-            /* in the data segment, like the original (its program counter
-             * was a data segment offset); this port used to read the model
-             * at that offset instead */
-            attr = (uint16_t)(ds_word((uint16_t)(offsetof(DataSeg, car_uv_table) + attr)) + o.word);
+            attr = (uint16_t)(shade_tab(attr.a) + o.word);
         if (i == 0)
             poly_begin(p, attr);
         else if (i < n)
@@ -286,7 +307,7 @@ static void draw_wheel(const ModelOp &o, const uint8_t *tex)
 
     int view = 0;
     for (int i = 0; i < 8; i++) {
-        if (cosine < G->wheel_sector_limits[i]) {
+        if (cosine < wheel_sector_limits[i]) {
             view = 8 - i;
             break;
         }
@@ -300,17 +321,17 @@ static void draw_wheel(const ModelOp &o, const uint8_t *tex)
     int16_t c0 = size(w.w0, c), s0 = size(w.w0, s);
     int16_t c1 = size(w.w1, c), s1 = size(w.w1, s);
 
-    PolyVertex *out = G->poly_buf[0].v;
+    PolyVertex *out = render.poly_buf[0].v;
     int16_t X = a.sx, Y = a.sy;
     out[0].sx = (int16_t)(X - c0 - s1); out[0].sy = (int16_t)(Y + s0 - c1);
     out[1].sx = (int16_t)(X - c0 + s1); out[1].sy = (int16_t)(Y + s0 + c1);
     out[2].sx = (int16_t)(X + c0 + s1); out[2].sy = (int16_t)(Y - s0 + c1);
     out[3].sx = (int16_t)(X + c0 - s1); out[3].sy = (int16_t)(Y - s0 - c1);
     for (int i = 0; i < 4; i++) {
-        out[i].a = (uint16_t)w.uv[i];
-        out[i].b = (uint16_t)(w.uv[i] >> 16);
+        out[i].a = w.uv[i].u;
+        out[i].b = w.uv[i].v;
     }
-    G->poly_buf[0].count = 4;
+    render.poly_buf[0].count = 4;
     draw_textured(tex);
 }
 
@@ -335,7 +356,7 @@ void Program::run(uint32_t i)
         switch (o.op) {
         case OP_PIXEL: {                /* FUN_1000_1408.LAB_LOC_6 */
             const ProjVertex &p = point(o.p[0]);
-            if (p.y >= G->near_clip)
+            if (p.y >= render.near_clip)
                 put_block(p.sx, p.sy, (uint8_t)o.word);
             break;
         }
@@ -344,18 +365,17 @@ void Program::run(uint32_t i)
             break;
         case OP_FACING: {               /* FUN_1000_1408.LAB_LOC_8 */
             const ProjVertex &p = point(o.p[0]);
-            poly_begin(p, 0);
-            poly_add(point(o.p[1]), 0);
-            poly_add(point(o.p[2]), 0);
-            poly_end(p, 0);
+            poly_begin(p, {});
+            poly_add(point(o.p[1]), {});
+            poly_add(point(o.p[2]), {});
+            poly_end(p, {});
             poly_hidden = poly_backfacing();    /* even if nothing is left */
             break;
         }
         case OP_FLAT: {                 /* FUN_1000_1408.LAB_LOC_9 */
             uint16_t count = draw_outline(o);
-            G->poly_color = o.word;
             if (outline_visible(count))
-                draw_flat();
+                draw_flat(o.word);
             break;
         }
         case OP_NOP:                    /* FUN_1000_1408.LAB_LOC_11 */
@@ -365,7 +385,6 @@ void Program::run(uint32_t i)
                 draw_shaded();
             break;
         case OP_SHADED_TAB:             /* FUN_1000_1408.LAB_LOC_14 */
-            G->poly_color = o.word;
             if (outline_visible(draw_outline(o)))
                 draw_shaded();
             break;
@@ -375,12 +394,12 @@ void Program::run(uint32_t i)
             break;
         case OP_SPRITE: {               /* FUN_1000_1408.LAB_LOC_18 */
             const ProjVertex &p = point(o.p[0]);
-            if (p.y >= G->near_clip)
+            if (p.y >= render.near_clip)
                 draw_sprite(p.sx, p.sy, p.y, o.sprite, tex);
             break;
         }
         case OP_WHEEL:                  /* FUN_1000_1408.LAB_LOC_20 */
-            if (point(o.p[0]).y >= G->near_clip)
+            if (point(o.p[0]).y >= render.near_clip)
                 draw_wheel(o, tex);
             break;
         case OP_SORT2:                  /* FUN_1000_1408.LAB_LOC_24 */
@@ -420,7 +439,7 @@ void draw_car(Car &car)
 {
     transform_car(car);
     if (!car.model_ops.empty()) {
-        Program program(car.model_ops, seg_ptr(car.texture_seg ? car.texture_seg : G->seg_textures));
+        Program program(car.model_ops, (car.skin.empty() ? segments.textures : car.skin).data());
         program.run(0);
     }
 }

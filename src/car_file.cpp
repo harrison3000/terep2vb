@@ -8,18 +8,16 @@
  *   0x08  uint16 drive       0 rear, 1 front, 2 all wheels
  *   0x0a  ...    the game's own state for the car (zero in the files):
  *         steer, throttle, handbrake, mid[3], steer_used, throttle_used,
- *         cell, ?, texture_seg, ref_vertex (offset), lowest_vertex (DS
+ *         cell, ?, texture segment, ref_vertex (offset), lowest_vertex (DS
  *         offset), 0x1e bytes ?, wheel_speed[4], spin[12], ?
  *   0x84  the sections, normally in the order above
  *
  * The original copied the file into the data segment and used it in place,
- * so the header doubles as the car's state.  The test host writes that
- * image back from the Car (host/host_test.cpp) to compare it with the
- * original's data segment.
+ * so the header doubles as the car's state.
  */
 #include "terep.hpp"
 
-Car cars[10];
+Car cars[MAX_CARS];
 
 namespace {
 
@@ -51,7 +49,9 @@ CarSpring read_spring(const Reader &r, size_t at)
     s.b = r.u16(at + 2);
     s.rest = r.i16(at + 4);
     s.last = r.i16(at + 6);
-    s.flags = r.u16(at + 8);
+    uint16_t flags = r.u16(at + 8);     /* low byte: type, high byte: shift */
+    s.type = (uint8_t)flags;
+    s.shift = (uint8_t)(flags >> 8);
     s.min_len = r.u16(at + 10);
     s.max_len = r.u16(at + 12);
     return s;
@@ -80,7 +80,6 @@ uint16_t car_read(Car &car, FILE *f)
     car.steer_used = { r.i16(0x16) };
     car.throttle_used = r.i16(0x18);
     car.cell = r.u16(0x1a);
-    car.texture_seg = r.u16(0x1e);
     for (int i = 0; i < 4; i++)
         car.wheel_speed[i] = r.i32(0x42 + 4 * i);
     for (int i = 0; i < 12; i++)

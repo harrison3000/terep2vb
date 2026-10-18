@@ -6,18 +6,35 @@
  * sound, the keys that change the game (Tab, Q, [, ], F9) and the text.
  *
  * The calls into the library are marked LIB: they are compiled only with
- * the library (make sdl GLR=1 ...).  What else it will need: TODO-lib.md.
+ * the library (make sdl; not with make no_gl).  What else it will need: TODO-lib.md.
+ *
+ * This file has a surprising amount of human generated code and gambiarras :)
+ *
  */
+#include <cmath>
 #include <string>
 #include "imgui.h"
 #include "game_renderer.hpp"
 #include "gui.hpp"
 #include "renderer_api.hpp"
+#include "vec3f.hpp"
 
 #ifdef TEREP2_GLR
     #include <SDL_opengl.h>
     #include "renderizeitor/include/renderizeitor.h"
     static RzContext* ctx;
+
+    // The internal camera's filter (IIR, one step per physics tick,
+    // opengl_tick): the reference vertex and the camera's axes of the car it
+    // is on.  Only while it is on (the library smooths the other cameras);
+    // restarted when the car or the camera changes.
+    struct CamFilter {
+        bool ready;                 // false: start from the next sample
+        Vec3f pos;                  // the reference vertex (camera_pt), in tiles
+        Vec3f fwd, up;              // where the internal camera looks, and its up
+
+        void step(Car &car, uint16_t camera_pt, int mode);     // one tick; mode: 1 F1, 2 F2
+    };
 
     struct carrodef_s{
         int32_t id;
@@ -27,6 +44,8 @@
 
     carrodef_s carros[5];
     int currTgt = 0;
+    int internalCamMode = 0;
+    static CamFilter cam_filter;
 
     static void updateCars();
     static int isLine(uint16_t[], int);
@@ -40,14 +59,38 @@
         vv * scale;        \
     })
 
-    #define F_UV(u, v, _raw) ({ \
-        uint32_t uraw = (_raw); \
+    #define F_UV(_u, _v, _uv) ({ \
+        TexCoord uv_ = (_uv); \
         float scale = 1.0f / 65535.0f;      \
-        u = (float)(uraw & 0xFFFF) * scale; \
-        v = (float)(uraw >> 16   ) * scale; \
+        _u = (float)uv_.u * scale; \
+        _v = (float)uv_.v * scale; \
     })
 
     extern int broke_some_ice;
+
+    // How much of the way to the new sample the filters go each tick
+    // (120 Hz): light for F1, which follows the car, stronger for F2.
+    constexpr float CAM_FILTER_F1 = 0.35f;
+    constexpr float CAM_FILTER_F2 = 0.12f;
+    constexpr float CAM_FILTER_POS = 0.5f;
+    constexpr float CAM_UP_BIAS_F2 = 0.7f;  // F2's up leans towards the sky
+
+    // b -> a, from the 16.16 positions (any unit: only directions are used)
+    static Vec3f delta(const Pos &a, const Pos &b)
+    {
+        Vec3 d = a - b;
+        return { (float)d.x, (float)d.y, (float)d.z };
+    }
+
+    // A vertex of the game in the library's units (tiles), z kept off the
+    // underflow (a car upside down in a low part of the map).
+    static Vec3f tiles(const Pos &p)
+    {
+        auto z = p.z.raw < 0xfe000000 ? p.z.raw : 0;
+        return { F_8_24(p.x.raw), F_8_24(p.y.raw), F_8_24(z) };
+    }
+
+    static RzVertex rz(Vec3f v) { return { v.x, v.y, v.z }; }
 
 // rzCreateWindow makes an OpenGL context of its own on the host's window and
 // leaves it current, and rzDestroy deletes it.  The host (ImGui: the map
@@ -101,7 +144,7 @@ bool opengl_start()
 
     for(int i = 0; i < 5; i++){
         carros[i].id = -1;
-        if(i >= G->num_cars){
+        if(i >= world.num_cars){
             continue;
         }
 
@@ -147,8 +190,8 @@ static void draw_text(const PictureRect &at, const char *s, int x, int y, uint8_
 
 static void draw_texts(const PictureRect &at)
 {
-    draw_text(at, G->title_text, 10, 10, 15);
-    draw_text(at, G->subtitle_text, 100, 190, 15);
+    draw_text(at, title_text, 10, 10, 15);
+    draw_text(at, subtitle_text, 100, 190, 15);
     if (!extra_options.hide_banner)
         draw_text(at, "GAMBIARRA FOREVER!", 5, 190, (uint8_t)(banner_color >> 2));
     banner_color++;
@@ -160,39 +203,103 @@ static void game_keys()
 {
     switch (keys[0]) {
     case 0x0f:{                             // Tab: next car for view 1
-        G->player_car[0]++;
-        if (G->player_car[0] >= (uint16_t)G->num_cars){
-            G->player_car[0] = 0;
+        world.player_car[0]++;
+        if (world.player_car[0] >= (uint16_t)world.num_cars){
+            world.player_car[0] = 0;
         }
-        G->player_car[1] = G->player_car[0];
+        world.player_car[1] = world.player_car[0];
         #ifdef TEREP2_GLR
-        auto c = carros[G->player_car[0]];
+        auto c = carros[world.player_car[0]];
         rzSetCameraTarget(ctx, c.id, c.camera_pt);
         currTgt = c.id;
+        cam_filter.ready = false;
         #endif
+        break;
+    }
+    #ifdef TEREP2_GLR
+    case 59:{ //F1: internal
+        rzSetCamera(ctx, RZ_CAMERA_INTERNAL);
+        if(!internalCamMode){
+            cam_filter.ready = false;
+        }
+        internalCamMode = 1;
+        break;
+    }
+    case 60:{ //F2: internal2
+        rzSetCamera(ctx, RZ_CAMERA_INTERNAL);
+        if(!internalCamMode){
+            cam_filter.ready = false;
+        }
+        internalCamMode = 2;
+        break;
+    }
+    case 61:{ //F3: freeze pos
+        rzSetCamera(ctx, RZ_CAMERA_FOLLOW_FREEZE);
+        internalCamMode = 0;
+        cam_filter.ready = false;
+        break;
+    }
+    case 62:{ //F4: normal
+        rzSetCamera(ctx, RZ_CAMERA_FOLLOW);
+        internalCamMode = 0;
+        cam_filter.ready = false;
         break;
     }
     case 63:{ //F5: overview
-        #ifdef TEREP2_GLR
-        if(currTgt == -1){
-            auto c = carros[G->player_car[0]];
-            rzSetCameraTarget(ctx, c.id, c.camera_pt);
-            currTgt = c.id;
-        }else{
-            rzSetCameraTarget(ctx, -1, -1);
-            currTgt = -1;
-        }
-        #endif
+        rzSetCamera(ctx, RZ_CAMERA_OVERVIEW);
+        internalCamMode = 0;
+        cam_filter.ready = false;
         break;
     }
+    #endif
     case 0x1a:                              // [ and ]: gravity
-        G->gravity += 50;
+        world.gravity += 50;
         break;
     case 0x1b:
-        G->gravity -= 50;
+        world.gravity -= 50;
         break;
     }
     keys[0] = 0;
+}
+
+#ifdef TEREP2_GLR
+// One step towards the car's current reference vertex and axes (the first
+// one after a reset starts there).
+void CamFilter::step(Car &car, uint16_t camera_pt, int mode)
+{
+    const float k = mode == 2 ? CAM_FILTER_F2 : CAM_FILTER_F1;
+    Vec3f p = tiles(car.points[camera_pt].pos);
+    // Car::axis_x and axis_y (physics.cpp) in float, from the exact
+    // differences of the body vertices 4..7: to the right, and to the front
+    // (axis_y, (4 - 6) + (5 - 7), points to the back: here it is reversed)
+    const CarVertex *v = car.vertices();
+    Vec3f r = delta(v[7].pos, v[6].pos).normalized();
+    Vec3f f = (delta(v[6].pos, v[4].pos) + delta(v[7].pos, v[5].pos)).normalized();
+    Vec3f u = f.cross(r);                               // unit-sized: the bias below is in those units
+    if (mode == 2)
+        u.z += CAM_UP_BIAS_F2;
+    u = u.normalized();
+
+    if (!ready) {
+        *this = { true, p, f, u };
+        return;
+    }
+    pos = pos.toward(p, CAM_FILTER_POS);
+    fwd = fwd.toward(f, k).normalized();
+    up = up.toward(u, k).normalized();
+}
+#endif
+
+// After each physics tick (120 Hz, two or so per frame): the state of the
+// game at that tick, for what needs more than one sample per frame.  Here:
+// one step of the internal camera's filter, for the car it is on.
+void opengl_tick()
+{
+#ifdef TEREP2_GLR
+    int ci = world.player_car[0];
+    if (internalCamMode && carros[ci].id >= 0)
+        cam_filter.step(car_get(ci), carros[ci].camera_pt, internalCamMode);
+#endif
 }
 
 bool opengl_frame(int win_w, int win_h, PictureRect *where)
@@ -201,7 +308,7 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         use_lib();                          // game_keys calls the library too
     #endif
     game_keys();
-    engine_sound(G->player_car[0], 0);      // what draw_view does for the sound
+    engine_sound(world.player_car[0], 0);      // what draw_view does for the sound
 
     #ifdef TEREP2_GLR
         if(broke_some_ice){
@@ -212,6 +319,15 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         updateCars();
         updateSprites();
         updateCamDists();
+        if(internalCamMode){
+            // the filtered axes (opengl_tick) of the car the camera is on
+            const CamFilter &c = cam_filter;
+            if (c.ready) {
+                RzVertex f = rz(c.fwd), u = rz(c.up);
+                rzSetCameraInternalAxes(ctx, &f, &u);
+            }
+        }
+
         rzRender(ctx);
         use_host();
     #endif
@@ -244,22 +360,17 @@ static void updateCars(){
         }
 
         int n = carros[ci].n_points;
-        auto car = car_get(ci);
-        carros[ci].camera_pt = car.ref_index;
+        Car &car = car_get(ci);
 
         RzVertex ptrs[n];
 
         for(int i =0; i< n; i++){
-            auto p = car.points[i].pos;
-
-            //prevents underflow related graphical glitches,
-            //most notable when the car gets upside down in a low part of the map
-            auto z = p.z.raw < 0xfe000000 ? p.z.raw : 0;
-
-            ptrs[i].x = F_8_24(p.x.raw);
-            ptrs[i].y = F_8_24(p.y.raw);
-            ptrs[i].z = F_8_24(z);
+            ptrs[i] = rz(tiles(car.points[i].pos));
         }
+        // the reference vertex (where the camera is): filtered, see opengl_tick;
+        // most cars do not use it for any polygon
+        if (internalCamMode && cam_filter.ready && ci == world.player_car[0])
+            ptrs[carros[ci].camera_pt] = rz(cam_filter.pos);
 
         //TODO review this constant, the limits are 45 deg
         float steering = (float)car.steer.raw * -0.0001f;
@@ -279,6 +390,8 @@ static void loadCar(int i, std::string cpcx){
     int idCar;
     rzCreateObject(ctx, carros[i].n_points, &idCar);
     carros[i].id = idCar;
+    carros[i].camera_pt = car.ref_index;
+    cam_filter.ready = false;
 
     if(cpcx != ""){
         rzLoadObjectTexture(ctx, idCar, cpcx.c_str());
@@ -311,9 +424,14 @@ static void loadCar(int i, std::string cpcx){
                 continue;
             }
 
-            if(color == 240){
-                //TODO handle all the different tones
-                rzAddObjectTranslucentPolygon(ctx, idCar, idxs, n, 8);
+            if(color >= 240){
+                int tone = color & 0xf;
+                if(color == 240){
+                    //special case, all the known cars use the 0 value
+                    //4..10 looked the nicest to me, but its a matter of taste
+                    tone = 6;
+                }
+                rzAddObjectTranslucentPolygon(ctx, idCar, idxs, n, tone);
             }else{
                 rzAddObjectPolygon(ctx, idCar, idxs, n, color);
             }
@@ -329,7 +447,7 @@ static void loadCar(int i, std::string cpcx){
 
             for(int i =0; i < n;i++){
                 auto v = pts[i];
-                uint32_t attr = v.attr;
+                TexCoord attr = { v.attr.a, v.attr.b };
                 
                 vtx[i].index = v.point >> 1;
                 F_UV(vtx[i].u, vtx[i].v, attr);                
@@ -344,7 +462,7 @@ static void loadCar(int i, std::string cpcx){
             continue;
         }
 
-        printf("unhandled: %d\n", o.op);
+        //printf("unhandled: %d\n", o.op);
     }
 
     if(wi == 4){
@@ -396,12 +514,12 @@ static int isLine(uint16_t vertx[], int n){
 }
 
 static void updateSprites(){
-    auto n_sprites = G->particle_bytes / 28;
+    auto n_sprites = world.particle_count;
 
     RzSprite spr[256];
 
     for(int i = 0; i < n_sprites && i < 256; i++){
-        auto s = G->particles[i];
+        auto s = world.particles[i];
         auto ds = &spr[i];
         
         ds[0] = {
@@ -415,9 +533,7 @@ static void updateSprites(){
         //110 so they begin visible and not 0 size
         int sz = 110 - s.life;
 
-        auto k = G->smoke_sprite[(uint8_t)s.kind >> 4];
-
-        if(k != 0x5a73){//this will break if we move these things out of the "DS segment"
+        if(smoke_quad_of_kind[(uint8_t)s.kind >> 4] != 0){ // not the smoke puff
             ds->type = RZ_SPRITE_DEBRIS;
             ds->opacity = 1.0f;
             ds->color = s.kind;

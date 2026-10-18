@@ -1,5 +1,5 @@
 // The list of renderers.  The OpenGL one is there only when the host is
-// built with the external library (make sdl GLR=1, see the Makefile).
+// built with the renderizeitor library (make sdl; make no_gl leaves it out).
 #include <cstring>
 #include "game_renderer.hpp"
 
@@ -11,9 +11,9 @@ constexpr bool HAVE_GLR = false;
 
 const GameRenderer game_renderers[] = {
     { "software", "the original's renderer, drawn by the game itself", true,
-      software_start, software_frame, software_stop },
+      software_start, software_frame, nullptr, software_stop },
     { "opengl", "the external OpenGL 3.3 renderer (see TODO-lib.md)", HAVE_GLR,
-      opengl_start, opengl_frame, opengl_stop },
+      opengl_start, opengl_frame, opengl_tick, opengl_stop },
 };
 const int game_renderer_count = sizeof game_renderers / sizeof game_renderers[0];
 

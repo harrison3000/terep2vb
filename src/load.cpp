@@ -2,11 +2,16 @@
  * Loading a track directory: the map layers (PCX images), the fog and
  * translucency tables, and up to five cars.
  *
- * File names are the ones stored in the data segment; the host opens them
+ * File names are the original's (fname_*, terep.hpp); the host opens them
  * (data_fopen, case-insensitive on systems that care).
  */
 #include <cstdlib>
 #include "terep.hpp"
+
+/* The PCX being read (the original kept them in its data segment). */
+static PcxHeader pcx_header;
+static uint16_t  pcx_width, pcx_height;
+static uint8_t   pcx_buffer[0x300];
 
 /* ------------------------------------------------------------------------
  * PCX (8-bit, single plane, RLE)
@@ -16,22 +21,22 @@
  * fewer than 8 bits per pixel, or 8 bits with no planes.  orig 1000:5a95 */
 static bool pcx_read_header(FILE *f)
 {
-    fread(&G->pcx_header, 1, sizeof G->pcx_header, f);
-    G->pcx_width = (uint16_t)(G->pcx_header.xmax - G->pcx_header.xmin + 1);
-    G->pcx_height = (uint16_t)(G->pcx_header.ymax - G->pcx_header.ymin + 1);
-    uint8_t bpp = G->pcx_header.bits_per_pixel;
-    return !(bpp < 8 || (bpp == 8 && G->pcx_header.planes == 0));
+    fread(&pcx_header, 1, sizeof pcx_header, f);
+    pcx_width = (uint16_t)(pcx_header.xmax - pcx_header.xmin + 1);
+    pcx_height = (uint16_t)(pcx_header.ymax - pcx_header.ymin + 1);
+    uint8_t bpp = pcx_header.bits_per_pixel;
+    return !(bpp < 8 || (bpp == 8 && pcx_header.planes == 0));
 }
 
 /* Decode the image into a segment, at most 256 x 256 pixels: wider
  * images are cropped (rows are packed, not padded to 256).  The file is
- * read through G->pcx_buffer in 768-byte chunks.  orig 1000:5acf */
+ * read through pcx_buffer in 768-byte chunks.  orig 1000:5acf */
 static void pcx_decode(FILE *f, uint8_t *dst)
 {
-    uint16_t in = sizeof G->pcx_buffer;     /* buffer empty */
+    uint16_t in = sizeof pcx_buffer;     /* buffer empty */
     uint16_t out = 0;
     uint8_t value = 0, repeat = 0;
-    int16_t rows = (int16_t)G->pcx_height > 0x100 ? 0x100 : (int16_t)G->pcx_height;
+    int16_t rows = (int16_t)pcx_height > 0x100 ? 0x100 : (int16_t)pcx_height;
     uint16_t row = (uint16_t)rows;
 
     do {
@@ -40,24 +45,24 @@ static void pcx_decode(FILE *f, uint8_t *dst)
             if (repeat) {
                 repeat--;
             } else {
-                if (in == sizeof G->pcx_buffer) {
-                    fread(G->pcx_buffer, 1, sizeof G->pcx_buffer, f);
+                if (in == sizeof pcx_buffer) {
+                    fread(pcx_buffer, 1, sizeof pcx_buffer, f);
                     in = 0;
                 }
-                value = G->pcx_buffer[in++];
+                value = pcx_buffer[in++];
                 if ((value & 0xc0) == 0xc0) {
                     repeat = (uint8_t)((value & 0x3f) - 1);   /* a count of 0 gives 255 */
-                    if (in == sizeof G->pcx_buffer) {
-                        fread(G->pcx_buffer, 1, sizeof G->pcx_buffer, f);
+                    if (in == sizeof pcx_buffer) {
+                        fread(pcx_buffer, 1, sizeof pcx_buffer, f);
                         in = 0;
                     }
-                    value = G->pcx_buffer[in++];
+                    value = pcx_buffer[in++];
                 }
             }
             if (x < 0x100)
                 dst[out++] = value;
             x++;
-        } while (x < G->pcx_width);
+        } while (x < pcx_width);
     } while (--row);
 }
 
@@ -91,25 +96,25 @@ static void read_table(const char *name, void *dst, size_t size)
  * goes on with whatever is in memory).  orig 1000:24c0 */
 static void load_map()
 {
-    if (!pcx_load(G->fname_map, heightmap()))
+    if (!pcx_load(fname_map, heightmap()))
         return;
-    if (!pcx_load(G->fname_maptex, seg_ptr(G->seg_maptex)))
+    if (!pcx_load(fname_maptex, segments.maptex.data()))
         return;
 
-    FILE *f = data_fopen(G->fname_col);
+    FILE *f = data_fopen(fname_col);
     if (!f)
         return;
     if (!pcx_read_header(f) || fseek(f, -0x300, SEEK_END) != 0) {
         fclose(f);
         return;
     }
-    fread(G->palette, 1, sizeof G->palette, f);
+    fread(map_tables.palette, 1, sizeof map_tables.palette, f);
     fseek(f, 0x80, SEEK_SET);
     pcx_decode(f, colormap());
     fclose(f);
 
-    read_table(G->fname_fog, G->fog_table, sizeof G->fog_table);
-    read_table(G->fname_smoke, G->shade_table, sizeof G->shade_table);
+    read_table(fname_fog, map_tables.fog_table, sizeof map_tables.fog_table);
+    read_table(fname_smoke, map_tables.shade_table, sizeof map_tables.shade_table);
 }
 
 /* ------------------------------------------------------------------------
@@ -154,101 +159,92 @@ static void find_ref_vertex(Car &car)
 }
 
 /* The car's skin: a PCX of up to 256 pixels width in its own segment.
- * Without it the car keeps the segment named in its file (0 = textures.pcx). */
+ * Without it the car uses textures.pcx. */
 static void load_car_skin(Car &car, const char *name)
 {
     FILE *f = data_fopen(name);
     if (!f)
         return;
     pcx_read_header(f);
-    uint16_t w = (int16_t)G->pcx_width > 0x100 ? 0x100 : G->pcx_width;
-    uint16_t paragraphs = (uint16_t)(((uint16_t)(w * G->pcx_height) >> 4) + 1);
-    uint16_t seg;
-    if (seg_alloc(paragraphs, &seg) == 0) {
-        car.texture_seg = seg;
-        pcx_decode(f, seg_ptr(seg));
-    }
+    car.skin.assign(SEGMENT_SIZE, 0);
+    pcx_decode(f, car.skin.data());
     fclose(f);
 }
 
-/* A word of the data segment at a computed offset. */
-static uint16_t &ds_word(size_t ofs)
-{
-    return *reinterpret_cast<uint16_t *>(ds_ptr((uint16_t)ofs));
-}
+static const char *const car_dat_names[MAX_CARS] = { "car1.dat", "car2.dat", "car3.dat", "car4.dat", "car5.dat" };
+static const char *const car_pcx_names[MAX_CARS] = { "car1.pcx", "car2.pcx", "car3.pcx", "car4.pcx", "car5.pcx" };
+const char *car_dat_name(int i) { return car_dat_names[i]; }
+const char *car_pcx_name(int i) { return car_pcx_names[i]; }
 
 /* Cars are loaded until a carN.dat is missing, lined up along y = 0x7a00
- * every 256 units of x.  The name tables hold 5 entries; a sixth car would
- * take its name from the bytes after them.  car_ofs still records where
- * the original would have put each car in car_pool (back to back), which
- * the test host uses (host_test/car_image.cpp). */
+ * every 256 units of x, at most 5 (the original's name tables hold 5; a
+ * sixth car took its name from the bytes after them). */
 static void load_cars()
 {
-    G->num_cars = 0;
-    G->car_ofs[0] = (uint16_t)offsetof(DataSeg, car_pool);
-    for (int i = 0; i < (int)(sizeof cars / sizeof cars[0]); i++) {
-        /* read through ds_ptr: i can run past the 5-entry tables */
-        const char *dat = (const char *)ds_ptr(ds_word(offsetof(DataSeg, car_dat_name) + 2 * i));
-        const char *pcx = (const char *)ds_ptr(ds_word(offsetof(DataSeg, car_pcx_name) + 2 * i));
+    world.num_cars = 0;
+    for (int i = 0; i < MAX_CARS; i++) {
+        const char *dat = car_dat_name(i), *pcx = car_pcx_name(i);
         Car &car = cars[i];
         uint16_t size = load_car(car, dat, (uint16_t)(0x8000 - i * 256), 0x7a00);
         if (!size || car.points.empty())
             break;
         find_ref_vertex(car);
         load_car_skin(car, pcx);
-        G->num_cars++;
-        if (i + 1 < (int)(sizeof G->car_ofs / sizeof G->car_ofs[0]))
-            G->car_ofs[i + 1] = (uint16_t)(G->car_ofs[i] + size);
+        world.num_cars++;
     }
 }
 
 /* ------------------------------------------------------------------------ */
 
+/* Changes render_scale during a game: only the hires screen depends on it. */
+void game_set_scale(int scale)
+{
+    render_scale = scale;
+    segments.hires_screen.assign(scale > 1 ? (size_t)screen_w() * screen_h() : 0, 0);
+}
+
+/* The segments and the cars, freed. */
+void game_free()
+{
+    segments = Segments();
+    for (Car &c : cars)
+        c = Car();
+}
+
 /* Returns 0 on success.  orig f_init */
 int game_init()
 {
-    /* everything outside the data segment as at the start of the program */
+    /* what state_reset does not cover, as at the start of the program */
     memset(keys, 0xff, sizeof keys);
-    for (Car &c : cars)
-        c = Car();
+    game_free();
     game_frame_reset();
-    free(hires_screen);
-    hires_screen = nullptr;
 
-    G->num_cars = -2;
-    G->unk_ec50 = 0x78;
-    G->gravity = 0x1800;
-    G->spring_break_stretch = 0x800;
-    G->spring_break_squash = (int16_t)0xf000;
-    G->clip_left = 0;
-    G->screen_cx = 160;
-    G->clip_right = 319;
-    G->clip_top = 0;
-    G->screen_cy = 80;
-    G->clip_bottom = 199;
+    world.num_cars = -2;
+    world.gravity = 0x1800;
+    world.spring_break_stretch = 0x800;
+    world.spring_break_squash = (int16_t)0xf000;
+    render.clip_left = 0;
+    render.screen_cx = 160;
+    render.clip_right = 319;
+    render.clip_top = 0;
+    render.screen_cy = 80;
+    render.clip_bottom = 199;
 
-    FILE *cfg = data_fopen(G->fname_cfg);   /* optional spring limits */
+    FILE *cfg = data_fopen(fname_cfg);   /* optional spring limits */
     if (cfg) {
-        fread(&G->spring_break_stretch, 1, 2, cfg);
-        fread(&G->spring_break_squash, 1, 2, cfg);
+        fread(&world.spring_break_stretch, 1, 2, cfg);
+        fread(&world.spring_break_squash, 1, 2, cfg);
         fclose(cfg);
     }
 
-    if (seg_alloc(0x1000, &G->seg_heightmap) || seg_alloc(0x1000, &G->seg_colormap) ||
-        seg_alloc(0x1000, &G->seg_textures) || seg_alloc(0x1000, &G->seg_maptex))
-        return 1;
+    for (auto *s : { &segments.heightmap, &segments.colormap, &segments.textures, &segments.maptex, &segments.screen })
+        s->assign(SEGMENT_SIZE, 0);
     load_map();
-    pcx_load(G->fname_textures, seg_ptr(G->seg_textures));      /* orig 1000:255c */
+    pcx_load(fname_textures, segments.textures.data());      /* orig 1000:255c */
     load_cars();
-
-    if (seg_alloc(0xfa0, &G->seg_screen))
-        return 1;
-    if (render_scale > 1) {
-        hires_screen = static_cast<uint8_t *>(calloc((size_t)screen_w(), (size_t)screen_h()));
-        if (!hires_screen)
-            return 1;
-    }
+    if (render_scale > 1)
+        segments.hires_screen.assign((size_t)screen_w() * screen_h(), 0);
     sound_init();
-    G->sim_running = 1;
+    world.sim_running = 1;
     return 0;
 }

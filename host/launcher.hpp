@@ -13,8 +13,8 @@ struct HostOptions {
 };
 
 // Runs until the player picks a map (true, *map set) or closes the
-// window (false).  Starts browsing where *map (if set, as from the last
-// call) is, with it selected, or else in the current directory.  render_scale
-// and extra_options (see terep.hpp) are edited in place, so values given on the
-// command line show up as the initial ones; so do the host's options.
+// window (false).  Starts browsing where *map (if set: the command line,
+// the preferences or the last call) is, with it selected, or else in the
+// current directory.  render_scale, extra_options (see terep.hpp) and the
+// host's options are edited in place, starting from their current values.
 bool launcher_run(std::string *map, HostOptions *host);     // draws in the gui (gui.hpp)

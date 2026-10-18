@@ -16,41 +16,38 @@ that corrupts the title) and a crash of the original that the port does not repr
 ## Building and running
 
 ```sh
-git submodule update --init   # Dear ImGui and Nuked-OPL3 (host/imgui, host/Nuked-OPL3), for terep2
+git submodule update --init   # Dear ImGui and Nuked-OPL3 (host/imgui, host/Nuked-OPL3), for terep2vibed
 make            # terep2-headless: test host, no dependencies
-make sdl        # terep2: playable SDL2 + OpenGL 3.3 version (needs libsdl2-dev, OpenGL and the submodules)
-make test       # runs the recorded scenarios and compares them with the reference
+make sdl        # terep2vibed: playable SDL2 + OpenGL 3.3 version, with the OpenGL renderer (needs libsdl2-dev, OpenGL, EGL and the submodules)
+make no_gl      # the same, without the OpenGL renderer (software only)
+make test       # replays the Win16 recordings in tests/ and compares the frames
 make -j8 all sdl  # in parallel: each source is its own object in build/, rebuilt when its headers change
-./terep2        # opens the map chooser, starting in the current directory
-./terep2 data/Asphalt
-./terep2 -s 4     # renders at 1280x800 (scale 1 to 8)
-./terep2 -E fix-ice-bug  # turns on an extra option (-E all: every one), see below
-./terep2 -n       # (--no-sound) no sound: the AdLib emulator is not even started
-./terep2 -m       # (--minimap) the map and the cars in the bottom right corner
-./terep2 -r opengl  # (--renderer) the external OpenGL renderer, if built in (see below)
+make coverage  # which lines of src/ the tests run (clang/LLVM): summary, and build/cov/html
+make coverage REPLAY="rec/dir data/Map"  # the same for one recording only
+./terep2vibed              # opens the map chooser where the last map was chosen
+./terep2vibed data/Asphalt # opens it with that map selected
 ```
 
-C++17 with GNU extensions (`__attribute__((packed))`, `-fwrapv` and `#embed`), so it builds with
+C++17 with GNU extensions (`__attribute__((packed))` for the PCX header, `-fwrapv` and `#embed`), so it builds with
 g++ 15+ or clang++ 19+. Tested on Linux x86-64 with both. The code does not depend on pointer
 size, but it has not been tested on 32 bits. Physics runs at 120 Hz and the display at 60 Hz, as
-in the Win16 port. The window opens at the size of the picture at the chosen scale (`-s`),
+in the Win16 port. The game's window opens at the size of the picture at the chosen scale,
 enlarged to at least 960x600 and reduced by a whole factor if it does not fit on the screen.
-Esc quits; in a game started from the map chooser it goes back to the chooser, where another
-map (or other options) can be picked. Each game starts from scratch: `game_init` resets
-everything the game keeps outside the data segment, and the host makes a new data segment and new
-segments (`host_free_game`).
+Esc pauses the game and opens a small menu: the render scale (software renderer only; the
+window follows it) and the minimap. Esc again resumes; the menu's button goes back to the
+chooser, where another map (or other options) can be picked. Each game starts from scratch: `game_init` resets
+the global state (`state_reset`) and everything the game allocated (`game_free`).
 
 Window: the SDL host owns one OpenGL 3.3 core context (`host/gui.cpp`). The map chooser, the
 game's picture (the software renderer's frame, as a texture, scaled to the window keeping its
 shape) and the minimap all go through Dear ImGui on it. An external OpenGL renderer can draw into
 the same context; `host/renderer_api.hpp` gives it the context, the real paths of the map's files
 (`map_files()`) and the map's height and tile layers (`map_layers()`). The renderer is chosen in
-the map chooser ("Renderer") or with `-r`: `software` (the default, the game's own picture) or
-`opengl`, which is only there when the host is built with the library:
-
-    make sdl GLR=1 GLR_DIR=its/include GLR_LIB="path/to/its.a ..."
-
-(changing these variables rebuilds what they touch, nothing has to be removed). The library's calls go
+the map chooser ("Renderer"): `software` (the default, the game's own picture) or
+`opengl`, Harrison's renderizeitor library (the submodule `host/renderizeitor`), which
+`make sdl` builds with its own Makefile and links in. `make no_gl` (or `make sdl NO_GL=1`)
+builds the host without it, with only the software renderer; switching between the two rebuilds
+what changes, nothing has to be removed. The library's calls go
 in `host/renderer_gl.cpp`, at the lines marked `LIB:`; in that mode `game_frame()` is not called,
 so the host plays the engine sound and handles Tab, Q, `[`, `]` and F9 itself. What is still to do
 for it is in [TODO-lib.md](TODO-lib.md).
@@ -59,31 +56,35 @@ Sound: the game writes the AdLib (OPL2) registers as the original did to ports 3
 (`src/sound.cpp`: an engine voice per view and the crash effect); the SDL host plays them through
 [Nuked-OPL3](https://github.com/nukeykt/Nuked-OPL3) (LGPL 2.1, a git submodule), an emulator of
 the OPL3 chip that starts in OPL2 mode, from an SDL audio callback at 48 kHz
-(`host/opl_sound.cpp`). "Disable sound" in the map chooser, or `-n` / `--no-sound`, leaves the
+(`host/opl_sound.cpp`). "Disable sound" in the map chooser leaves the
 audio device and the emulator alone. The test host does not play anything.
 
-Minimap ("Minimap" in the map chooser, off by default, or `-m` / `--minimap`): the SDL host draws
+Minimap ("Minimap" in the map chooser or the Esc menu, off by default): the SDL host draws
 the map semi-transparent in the bottom right corner, each cell in its colour and darker where it
 is low, with a square in a colour of its own and the number of each car (in the game's font) where
 its reference point is; x is to the right and y down, so a camera turned to yaw 0 looks up the
 minimap. It is drawn over the game's picture through ImGui (`host/minimap.cpp`), so the
 game's picture and the tests do not change.
 
-Without a map directory, `terep2` first opens a map chooser (Dear ImGui): the directories
-on the left, starting in the current one (`[map]` marks those with a `map.pcx` and a
+`terep2vibed` opens a map chooser (Dear ImGui): the directories on the left, starting where
+the last map was chosen, or at the map directory given on the command line (its only argument),
+with that map selected (`[map]` marks those with a `map.pcx` and a
 `col.pcx`); on the right a preview of the selected map, its terrain turning, drawn with the
 Comanche "voxel space" technique from `map.pcx` (heights) and `col.pcx` (colour of each cell
-through its palette); below it the render scale and the options (`fix-ice-bug` comes ticked
-there, and the scale starts at 3 unless `-s` is given; without the chooser the game stays
-faithful unless `-E` says otherwise, at scale 1 unless `-s` says otherwise). A click selects a
-directory, a double click enters it or plays the map, like the Play button (which needs a
-`car1.dat` too). `-s` and `-E` given on the command line are the initial values. The chooser
+through its palette); below it the render scale and the options (the first time, the scale
+is 3 and `fix-ice-bug` is ticked). A click selects a directory, a double click enters it or
+plays the map, like the Play button (which needs a `car1.dat` too). The chooser
 lives in `host/` (`launcher.cpp`, `voxel_preview.cpp`, `pcx.cpp`, with its own PCX reader) and
 does not touch the game code.
 
-`-E name` (or `--extra-options name`; in both hosts, repeatable, `all` for every one) turns on
-an extra option: a fix of a bug of the original, or another change to what it does. By default
-the game behaves like the original. The options are listed in `extra_option_list` (`game.cpp`)
+The chooser's choices (renderer, scale, minimap, sound, extra options and the last map) are
+kept in `prefs.txt`, one `key: value` per line, in SDL's preference directory
+(`~/.local/share/terep2vibed` on Linux, `%APPDATA%\terep2vibed` on Windows). They are read when the
+chooser opens and written when a game starts, only if something changed.
+
+Extra options are fixes of bugs of the original, or other changes to what it does; without
+them the game behaves like the original (the test host turns them on with `-E name`,
+repeatable, `all` for every one). The options are listed in `extra_option_list` (`game.cpp`)
 and kept in `extra_options`, which the map chooser shows as checkboxes:
 
 | Name | What it does |
@@ -93,11 +94,11 @@ and kept in `extra_options`, which the map chooser shows as checkboxes:
 
 ### Higher resolution
 
-`-s N` (in both hosts) renders at 320·N x 200·N. Scale 1 is the original, byte for byte. At
+The render scale N (the chooser, the Esc menu; `-s N` in the test host) renders at 320·N x 200·N. Scale 1 is the original, byte for byte. At
 larger scales only the drawing changes; the game state is identical at any scale:
 
 - the screen, the clipping and the scanline tables grow with it (`render_scale`, `screen_w()`,
-  `screen_h()`; the large framebuffer lives outside the data segment);
+  `screen_h()`);
 - projection uses the full 16.16 position, relative to the eye, instead of the original's
   whole units (`view_transform_fine` in `scene.cpp`). With whole units a car close to the camera
   jumps several pixels at a time, which at 4x becomes a very visible jitter. Integer camera
@@ -133,10 +134,8 @@ src/            the game (no OS or library dependencies)
   terep.hpp     value types (Vec3, Coord, Pos), structures (Car, CarVertex, CarSpring,
                 Particle, ChaseCam, ProjVertex, PcxHeader...) and prototypes
   fixed.hpp     fixed point: Angle (0x10000 = 360°), Q15 (sine/cosine, matrices), multiplications
-  dataseg.def   map of the original data segment, field by field (the source of truth)
-  dataseg_init.cpp  initial contents of the segment (tables, font, names, settings), in code
+  state.cpp     the global state (world, camera, render, map_tables, contact) and its initial values
   font.pbm      the font (plain PBM, 5x5 glyphs one below the other), embedded with #embed
-  dataseg.hpp   struct DataSeg generated from the .def (tools/gen_dataseg.py)
   math.cpp      table-driven sine/cosine, atan2, vector length, rotation matrix
   terrain.cpp   terrain height (2 triangles per heightmap cell)
   physics.cpp   soft body (Car methods): controls, wheels, springs, integration, collision, particles
@@ -151,13 +150,14 @@ src/            the game (no OS or library dependencies)
   game.cpp      one frame (views, text, keys) and the keyboard
 host/
   host.hpp      what the hosts share
-  common.cpp    64 KB segments, creating the data segment, time step, case-insensitive file opening
+  common.cpp    starting and freeing a game, time step, case-insensitive file opening
   sdl_main.cpp  SDL2 host
   gui.cpp       its window: one OpenGL 3.3 core context, with ImGui (OpenGL3 backend) on it
   renderer_api.hpp  what an external OpenGL renderer gets: the context, the map's files and layers
   game_renderer.cpp the renderers to choose from; renderer_sw.cpp (the game's picture),
-                renderer_gl.cpp (the external library, built with GLR=1)
+                renderer_gl.cpp (the renderizeitor library, left out by make no_gl)
   launcher.cpp  map chooser (Dear ImGui) shown when no map is given
+  prefs.cpp     the chooser's preferences file (prefs.txt, "key: value" per line)
   voxel_preview.cpp  the chooser's preview: the map's terrain in voxel space
   pcx.cpp       PCX reader for the preview (separate from the game's)
   opl_sound.cpp the game's AdLib writes played through Nuked-OPL3 and SDL audio
@@ -165,12 +165,10 @@ host/
   imgui/        Dear ImGui (git submodule)
   Nuked-OPL3/   OPL3 emulator (git submodule, LGPL 2.1)
 host_test/      the test host (terep2-headless)
-  main.cpp      runs N frames with scripted keys and prints CRCs
-  car_image.cpp the cars written back into the data segment in the original's format, for comparing
-  dsmask.h      what the data segment CRC leaves out (shared with the oracles)
-data/           the Asphalt map and data.bin (the original's data segment, only for the oracles)
-tests/          run_tests.sh and references (ref/*.txt = keys, *.crc)
-tools/          oracles used for verification (below), dataseg.hpp generator, script generator
+  main.cpp      replays a recording of the Win16 port and compares the frames
+data/           the maps (not in the repository)
+tests/          run_tests.sh and the Win16 recordings (one directory each: record.txt, frames)
+tools/          synthetic and face car makers (test maps)
 ```
 
 ### C++ style
@@ -190,32 +188,35 @@ no exceptions, no inheritance):
   (`Angles` with `roll`, `pitch`, `yaw`) and the steering (`Car::steer`). `.raw` gives the raw
   value where the original does arithmetic on it (shifts, 32-bit products).
 - **Methods on the car.** `Car` is the `carN.dat` header with `vertices()`, `springs()` and the
-  physics as methods (`car.update_springs()`, `car.jump(...)`); `CarSpring::type()/softness()`,
+  physics as methods (`car.update_springs()`, `car.jump(...)`); `CarSpring::type`/`softness()`,
   `CarVertex::is_wheel()`, `Particle::ICE_CHIP` etc. The car's model (a small bytecode program)
   is decoded at load time into a list of typed instructions, `ModelOp`, with jump and call
   targets as indices; `draw_car` runs it with a local `Program`.
 - **References, `bool`, `enum`, lambdas** instead of output pointers, int flags, `#define`s and
   local macros; no `goto`.
-- `#pragma once` in every header; the data segment structs are trivially copyable, with no
+- `#pragma once` in every header; the state structs are trivially copyable, with no
   constructors.
 
-One rule that matters: **the structures that live in the data segment are `packed`** (the layout
-has to match the original segment) and C++ does not allow binding a reference to a field of a
-packed struct (`int &x = G->gravity` does not compile). In those cases the code uses a copy and
-writes it back, or a pointer. Calling a method on a packed field works normally. The cars
-(`Car`, `CarVertex`, `CarSpring`) and the value types (`Vec3`, `Coord`, `Pos`, `Angle`, `Q15`)
-are ordinary structs.
+The structures that lived in the data segment used to be `packed`, to keep the original layout;
+they are ordinary structs now (only `PcxHeader`, a file format, is still packed). Some code
+still uses a copy and writes it back, or a pointer, where a reference would do now.
 
-### Why there is still a "data segment"
+### Global state
 
-The original keeps everything in one 64 KB segment: the font's offset table wraps around in 16
-bits, the file names are found by offset and the jump bug used to write into the title. So the
-global state is still a `struct DataSeg` with the original layout, but every field has a name and
-a type (`G->gravity`, `G->chase_cam[1]`...). The remaining offset accesses (`ds_ptr`) are where
-the original really does address arithmetic: the font, the file name tables, the smoke quads.
-The asm's scratch variables became local variables. What lives outside the segment: the cars,
-the keyboard (`keys`), the image segments (heightmap, colour map, textures, screen, each car's
-texture) and the host.
+The original keeps everything in one 64 KB data segment, addressed by offsets. Here the state is
+a few global structures, split by subject (`terep.hpp`, each field with its original offset in a
+comment): `world` (gravity, cars, players, particles), `camera`, `render` (clipping, polygons,
+visible terrain, scanline tables), `map_tables` (palette, fog and translucency tables) and
+`contact` (the last ground contact). `state_reset()` (`state.cpp`) gives them their initial
+values. Only what really carries state from one call to the next is there: the asm's scratch
+variables, and what the original passed from one function to the next through the segment (the
+polygon colour, the scanline range, the terrain rows, the collision planes, the ground probe,
+the camera's axes), are locals and parameters now. Some of what stayed is less obvious than it
+looks: the particles of a car-vs-car push take their velocity from the last ground contact, and
+the visible terrain is kept from the last frame when the view hexagon is clipped away. Besides
+them: the cars, the keyboard
+(`keys`), and `segments` (heightmap, colour map, textures, screen: 64 KB vectors indexed with
+16-bit offsets that wrap like the original's; each car's skin is in its `Car`).
 
 ### Cars
 
@@ -224,50 +225,30 @@ itself: the header holds the state (steering, throttle, wheels...), the points a
 read by offset and the model is a program whose counter is an offset in the segment. Here
 `car_read` (`src/car_file.cpp`) parses the file into a `Car` with `std::vector`s of points and
 springs and the model decoded (`model_decode`: one `ModelOp` per instruction, the program
-counter becomes an index into that list). The game keeps nothing else of the file. The test host
-goes the other way (`host_test/car_image.cpp`): it writes each `Car` back in the file format,
-taking the model's bytes and an unknown header word from the file again, into a copy of the
-segment where the original would have the cars (`car_ofs`), and computes the CRC over that copy,
-so the comparison with the original is still byte for byte. The title bug was fixed in `Car::jump`.
+counter becomes an index into that list). The game keeps nothing else of the file. The title bug
+was fixed in `Car::jump`.
 
-The initial contents of the segment, which the original read from `data.bin`, are written by
-`dataseg_init()` (`src/dataseg_init.cpp`): texts and file names as strings, the font read from
-`src/font.pbm` (embedded in the executable with `#embed`), the surface, key and hull tables as
-arrays, the sine and atan tables computed (the original's atan table was made with π typed as
-3.14169; one entry, a rounding tie, is set by hand). DOS leftovers that nothing reads (XMS messages, an old sound sequence) are still
-there, so the segment comes out byte for byte identical to the original and the tests keep
-comparing against the asm.
+What the original read from `data.bin` is now written by code. The constants live with the code
+that uses them: the texts in `game.cpp`, the file names in `terep.hpp`/`load.cpp`, the font in
+`text.cpp` (read from `src/font.pbm`, embedded in the executable with `#embed`), the surface, key
+and hull tables in `physics.cpp`, the sound patches in `sound.cpp`, the smoke quads in
+`scene.cpp`, and the sine and atan tables computed in `math.cpp` (the atan table with a slightly
+wrong π, 3.141688765, which gives exactly the original's). Until the data segment was split, it
+came out byte for byte identical to the original,
+which the old tests compared with the asm (see Verification).
 
 ## Verification
 
-Two oracles, both in `tools/`:
+`make test` (`tests/run_tests.sh`) replays the recordings made with the Win16 port, one
+directory per recording in `tests/` (the map is the one of its `#selected path:` line, under
+`data/`), and compares the frames: every frame's hash and a few full frames.
 
-- **original asm** (`tools/asm_oracle`): `maincode.asm` itself assembled with nasm and run in a
-  16-bit x86 emulator (unicorn), with the DOS services emulated. It is the reference truth.
-  `sh tools/asm_oracle/build.sh ../terep2isolado out/` and then `python3 out/run.py`.
-- **previous_effort** (`tools/oracle`): the old mechanical C++ translation, with a Linux host.
-  It is ~1000x faster than the emulator and can swap subsystems for the new code
-  (`--new physics,render,init`), which made it possible to rewrite one part at a time.
-  `bash tools/build_oracle.sh build/`.
-
-All of them print, per frame, the CRC32 of the framebuffer and of the data segment (with
-`host_test/dsmask.h` masking only register garbage that the original leaves in scratch variables).
-Results:
-
-- a 600-frame scenario that goes through every key (`tools/cenario.py`): new =
-  previous_effort = asm;
-- 12 random scripts of 3000 frames (`tools/fuzz_script.py`): new = previous_effort in all of
-  them, with g++ and with clang++;
-- random scripts 4 and 7 (3000 frames each) against the asm: 7 is identical. 4 diverges from
-  frame 1591, where the original hits the title bug, which is fixed here (explained below).
-  Before the fix it matched the asm in the whole data segment.
-
-`make test` repeats the scenario and random script 1 and compares them with the recorded
-references. It also runs the scenario with car 1 given a synthetic model that uses every opcode
-of the bytecode (`tools/synth_model.py`, built from the map's own car file, so it is not stored
-in the repository); the demo's cars only use six of them. It also plays 300 frames on another map, frees everything and then
-runs the scenario again in the same process (`terep2-headless -p map:frames`), which has to give
-the same output as a fresh process.
+Before that, while the data segment still had the original layout, the tests compared a CRC of
+the frame buffer and of the whole data segment, per frame, with the original asm (assembled with
+nasm and run in a 16-bit x86 emulator, unicorn) and with an older mechanical C++ translation:
+a 600-frame scenario through every key and a dozen random scripts of 3000 frames matched,
+except where the original hits the title bug, fixed here (below). That setup is in the git
+history (`tools/asm_oracle`, `tests/ref`, `host_test/car_image.cpp`).
 
 Recordings made with the Win16 port are replayed with `terep2-headless -R recdir mapdir`
 (`-C` instead of `-R` only compares, writing nothing). `recdir/record.txt` has one call per line,
@@ -283,6 +264,14 @@ told apart by its first letter and made exactly as recorded at 1x: `init`, `P` (
 
 The last line sums it up, and the exit code is 1 if any frame differs or has no original.
 
+`-s N` replays at a higher scale. The recorded hashes are of 1x frames, so there they are
+replaced by the port's own: `-R` writes them to `recdir/hashes_Nx.txt` (one per
+`frame_fnv1a_64` line) and `-C` compares with that file, as a regression test of the higher
+scales. The `frame:` images are compared by similarity instead: the average colour of each 8 x 8
+block (in 1x pixels), whose mean difference must stay under 15 (the finer projection moves
+edges and texels by less than a pixel; the same picture gives 1 to 10, another one over 30).
+`make test` also replays every recording at each scale it has a `hashes_Nx.txt` for.
+
 ## Things found along the way
 
 Bugs and quirks of the original that were **kept** (they are commented in the code):
@@ -294,7 +283,12 @@ Bugs and quirks of the original that were **kept** (they are commented in the co
 - Projection of the points cut by the near plane uses the fixed centre (160,100), even with the
   screen split.
 - `find_ref_vertex` takes its iteration count from the fractional part of the first vertex's x.
-- The PCX header is barely validated; a sixth car would read its name past the end of the table.
+- The PCX header is barely validated.
+
+Differences that only show with unusual data: at most 5 cars are loaded (the original's name
+tables hold 5, and a sixth car took its name from the bytes after them), and text characters
+>= 128 use the glyph of `c & 0x7f` (the original's offsets wrapped around the data segment; only
+its jump bug put such characters in the title).
 
 Bug of the original that was **fixed**:
 
@@ -305,7 +299,7 @@ Bug of the original that was **fixed**:
   the end of `data.bin`, the corrupted title was not even the same between builds. Now such a
   car looks for its lowest point as on a fresh press, and the jump works.
 
-Bug of the original that can be **fixed on request** (`-E fix-ice-bug`):
+Bug of the original that can be **fixed on request** (the `fix-ice-bug` option):
 
 - **Ice pillars**: an ice chip that lands lowers the heightmap cell under it by one
   (`particles_update`). The height is a byte, so at 0 it wraps around to 255, the highest
@@ -329,7 +323,7 @@ Crash of the original that the port **does not reproduce** (left as it is):
 
 Difference between the Win16 port and `previous_effort`: the spring length (`sqrt`) is rounded
 (CVTSS2SI) in the binary, while previous_effort truncated it. That is why it drifted from the
-original after a few hundred frames; the oracle in `tools/oracle` already has the fix.
+original after a few hundred frames.
 
 ## Not done
 
