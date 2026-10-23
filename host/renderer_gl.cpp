@@ -16,6 +16,7 @@
 #include "imgui.h"
 #include "game_renderer.hpp"
 #include "gui.hpp"
+#include "launcher.hpp"
 #include "renderer_api.hpp"
 #include "vec3f.hpp"
 
@@ -110,10 +111,34 @@ static void use_host()
 #endif
 
 static uint8_t banner_color;               // as game_frame's, which is not called here
+static int draw_distance = DRAW_DISTANCE_DEFAULT;
+static bool fog_changed = true;            // rzSetFog at the next frame
+
+void opengl_set_draw_distance(int tiles)
+{
+    draw_distance = tiles;
+    fog_changed = true;
+}
+
+#ifdef TEREP2_GLR
+// The fog for a draw distance: it starts there (linear with the slider)
+// and is complete at end = 120 - 116 (1 - t)^k, t the slider from 0 to 1:
+// 4 at the minimum, 120 at the maximum, never more, and k such that the
+// default gives the library's own fog (30, 65).
+static void apply_fog()
+{
+    constexpr float MIN = DRAW_DISTANCE_MIN, DEF = DRAW_DISTANCE_DEFAULT, MAX = DRAW_DISTANCE_MAX;
+    static const float k = std::log((120 - 65) / 116.0f) / std::log(1 - (DEF - MIN) / (MAX - MIN));
+    float start = (float)draw_distance, t = (start - MIN) / (MAX - MIN);
+    rzSetFog(ctx, start, 120 - 116 * std::pow(1 - t, k));
+    fog_changed = false;
+}
+#endif
 
 bool opengl_start()
 {
     banner_color = 0;
+    fog_changed = true;
 #ifdef TEREP2_GLR
     MapFiles files = map_files(".");        // real paths of the map's files
     MapLayers layers = map_layers();        // height and tile, 256 x 256, change while playing
@@ -192,8 +217,13 @@ static void draw_texts(const PictureRect &at)
 {
     draw_text(at, title_text, 10, 10, 15);
     draw_text(at, subtitle_text, 100, 190, 15);
-    if (!extra_options.hide_banner)
-        draw_text(at, "GAMBIARRA FOREVER!", 5, 190, (uint8_t)(banner_color >> 2));
+    if (!extra_options.hide_banner) {
+        const char *banner = draw_distance <= DRAW_DISTANCE_MIN ? "Silent Terep2"
+                           : draw_distance >= DRAW_DISTANCE_MAX ? "Terep2:\nDefinitive Edition"
+                                                                : "GAMBIARRA FOREVER!";
+        bool longer = draw_distance >= DRAW_DISTANCE_MAX;       // would run into the subtitle
+        draw_text(at, banner, 5, longer ? 181 : 190, (uint8_t)(banner_color >> 2));
+    }
     banner_color++;
 }
 
@@ -319,6 +349,8 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         updateCars();
         updateSprites();
         updateCamDists();
+        if (fog_changed)
+            apply_fog();
         if(internalCamMode){
             // the filtered axes (opengl_tick) of the car the camera is on
             const CamFilter &c = cam_filter;

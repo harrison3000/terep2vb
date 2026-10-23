@@ -31,4 +31,5 @@ void software_stop();
 bool opengl_start();
 bool opengl_frame(int win_w, int win_h, PictureRect *where);
 void opengl_tick();
+void opengl_set_draw_distance(int tiles);  // DRAW_DISTANCE_MIN..MAX (launcher.hpp); any time
 void opengl_stop();

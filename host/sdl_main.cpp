@@ -130,6 +130,11 @@ static bool esc_menu(const GameRenderer &renderer, HostOptions *host, Minimap **
         ImGui::SameLine();
         ImGui::TextDisabled("%d x %d", screen_w(), screen_h());
     }
+    if (std::string_view(renderer.name) == "opengl") {
+        ImGui::SetNextItemWidth(200);
+        if (ImGui::SliderInt("Draw distance", &host->draw_distance, DRAW_DISTANCE_MIN, DRAW_DISTANCE_MAX))
+            opengl_set_draw_distance(host->draw_distance);      // seen at once, the game is drawn while paused
+    }
     if (ImGui::Checkbox("Minimap", &host->minimap)) {
         delete *mini;
         *mini = host->minimap ? new Minimap() : nullptr;
@@ -148,6 +153,7 @@ static bool esc_menu(const GameRenderer &renderer, HostOptions *host, Minimap **
 // menu above.
 static Ending run(const GameRenderer &renderer, HostOptions *host)
 {
+    opengl_set_draw_distance(host->draw_distance);
     if (!renderer.start()) {
         fprintf(stderr, "the %s renderer could not start\n", renderer.name);
         return Ending::FAILED;

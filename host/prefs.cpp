@@ -32,6 +32,7 @@ static std::string prefs_text(const HostOptions &host, const std::string &map)
     std::string t;
     t += std::string("renderer: ") + game_renderers[host.renderer].name + "\n";
     t += "scale: " + std::to_string(render_scale) + "\n";
+    t += "draw-distance: " + std::to_string(host.draw_distance) + "\n";
     t += std::string("minimap: ") + on_off(host.minimap) + "\n";
     t += std::string("sound: ") + on_off(!host.no_sound) + "\n";
     for (int i = 0; i < extra_option_count; i++)
@@ -63,6 +64,10 @@ void prefs_load(HostOptions *host, std::string *map)
             int s = atoi(value.c_str());
             if (s >= 1 && s <= MAX_RENDER_SCALE)
                 render_scale = s;
+        } else if (key == "draw-distance") {
+            int d = atoi(value.c_str());
+            if (d >= DRAW_DISTANCE_MIN && d <= DRAW_DISTANCE_MAX)
+                host->draw_distance = d;
         } else if (key == "minimap") {
             host->minimap = on;
         } else if (key == "sound") {

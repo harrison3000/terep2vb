@@ -4,6 +4,7 @@
 //
 //   renderer: opengl
 //   scale: 3
+//   draw-distance: 30
 //   minimap: on
 //   sound: on
 //   fix-ice-bug: on

@@ -49,7 +49,9 @@ the map chooser ("Renderer"): `software` (the default, the game's own picture) o
 builds the host without it, with only the software renderer; switching between the two rebuilds
 what changes, nothing has to be removed. The library's calls go
 in `host/renderer_gl.cpp`, at the lines marked `LIB:`; in that mode `game_frame()` is not called,
-so the host plays the engine sound and handles Tab, Q, `[`, `]` and F9 itself. What is still to do
+so the host plays the engine sound and handles Tab, Q, `[`, `]` and F9 itself. Its draw distance
+(where the fog starts, 1 to 110 tiles, 30 by default) is a slider in the chooser and in the Esc
+menu, which shows the change at once (`rzSetFog`). What is still to do
 for it is in [TODO-lib.md](TODO-lib.md).
 
 Sound: the game writes the AdLib (OPL2) registers as the original did to ports 388h/389h
@@ -77,7 +79,7 @@ plays the map, like the Play button (which needs a `car1.dat` too). The chooser
 lives in `host/` (`launcher.cpp`, `voxel_preview.cpp`, `pcx.cpp`, with its own PCX reader) and
 does not touch the game code.
 
-The chooser's choices (renderer, scale, minimap, sound, extra options and the last map) are
+The chooser's choices (renderer, scale, draw distance, minimap, sound, extra options and the last map) are
 kept in `prefs.txt`, one `key: value` per line, in SDL's preference directory
 (`~/.local/share/terep2vibed` on Linux, `%APPDATA%\terep2vibed` on Windows). They are read when the
 chooser opens and written when a game starts, only if something changed.

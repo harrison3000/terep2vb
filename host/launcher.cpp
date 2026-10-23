@@ -199,6 +199,12 @@ bool Launcher::frame(std::string *map)
     ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + show_w * 0.5f);
     ImGui::TextDisabled("%s", game_renderers[host->renderer].what);
     ImGui::PopTextWrapPos();
+    if (std::string_view(game_renderers[host->renderer].name) == "opengl") {
+        ImGui::SetNextItemWidth(show_w * 0.5f);
+        ImGui::SliderInt("##draw", &host->draw_distance, DRAW_DISTANCE_MIN, DRAW_DISTANCE_MAX, "%d tiles");
+        ImGui::SameLine();
+        ImGui::TextDisabled("draw distance (where the fog starts)");
+    }
 
     ImGui::SeparatorText("Misc options");
     float wrap = ImGui::GetCursorPosX() + show_w;
