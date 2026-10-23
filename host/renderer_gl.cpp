@@ -11,6 +11,7 @@
  * This file has a surprising amount of human generated code and gambiarras :)
  *
  */
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include "imgui.h"
@@ -84,14 +85,14 @@
     constexpr float CAM_UP_BIAS_F2 = 0.7f;  // F2's up leans towards the sky
 
     // Field of view (vertical, degrees): fixed in the internal cameras; in the
-    // chase camera from FOV_SLOW standing still to FOV_FAST at FOV_FAST_SPEED
-    // (tiles per tick, about 7 tiles a second: fast for the demo's cars) and
-    // over; the other cameras keep the library's default.  Each frame
+    // chase camera FOV_SLOW up to FOV_SLOW_SPEED, then up to FOV_FAST at FOV_FAST_SPEED
+    // and over (tiles per tick; 0.1 is 12 tiles a second), squared in
+    // between; the other cameras keep the library's default.  Each frame
     // fov_target is set for the camera and fov_current goes FOV_FILTER of the
     // way to it (about half a second to settle): no jump in a crash, nor when
     // changing camera.
     constexpr float FOV_INTERNAL = 60, FOV_SLOW = 50, FOV_FAST = 70, FOV_DEFAULT = 50;
-    constexpr float FOV_FAST_SPEED = 0.1f, FOV_FILTER = 0.04f;
+    constexpr float FOV_SLOW_SPEED = 0.03f, FOV_FAST_SPEED = 0.1f, FOV_FILTER = 0.04f;
     static float fov_target = FOV_SLOW, fov_current = FOV_SLOW;
 
     // b -> a, from the 16.16 positions (any unit: only directions are used)
@@ -369,7 +370,7 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         } else if (cam_mode == RZ_CAMERA_FOLLOW) {
             int ci = world.player_car[0];
             float speed = tiles(car_get(ci).points[carros[ci].camera_pt].vel).length();
-            float spdd = std::min(speed / FOV_FAST_SPEED, 1.0f);
+            float spdd = std::clamp((speed - FOV_SLOW_SPEED) / (FOV_FAST_SPEED - FOV_SLOW_SPEED), 0.0f, 1.0f);
             fov_target = FOV_SLOW + (FOV_FAST - FOV_SLOW) * spdd * spdd;
         } else {
             fov_target = FOV_DEFAULT;
