@@ -32,6 +32,7 @@
     struct CamFilter {
         bool ready;                 // false: start from the next sample
         Vec3f pos;                  // the reference vertex (camera_pt), in tiles
+        Vec3f vel;                  // its velocity, per tick, filtered
         Vec3f fwd, up;              // where the internal camera looks, and its up
 
         void step(Car &car, uint16_t camera_pt, int mode);     // one tick; mode: 1 F1, 2 F2
@@ -74,6 +75,7 @@
     constexpr float CAM_FILTER_F1 = 0.35f;
     constexpr float CAM_FILTER_F2 = 0.12f;
     constexpr float CAM_FILTER_POS = 0.5f;
+    constexpr float CAM_FILTER_VEL = 0.20f;  // the reference vertex's velocity, for the position
     constexpr float CAM_UP_BIAS_F2 = 0.7f;  // F2's up leans towards the sky
 
     // b -> a, from the 16.16 positions (any unit: only directions are used)
@@ -90,6 +92,9 @@
         auto z = p.z.raw < 0xfe000000 ? p.z.raw : 0;
         return { F_8_24(p.x.raw), F_8_24(p.y.raw), F_8_24(z) };
     }
+
+    // A velocity of the game (8.24 cells per tick) in tiles per tick.
+    static Vec3f tiles(const Vec3 &v) { return { F_8_24((float)v.x), F_8_24((float)v.y), F_8_24((float)v.z) }; }
 
     static RzVertex rz(Vec3f v) { return { v.x, v.y, v.z }; }
 
@@ -311,10 +316,14 @@ void CamFilter::step(Car &car, uint16_t camera_pt, int mode)
     u = u.normalized();
 
     if (!ready) {
-        *this = { true, p, f, u };
+        *this = { true, p, tiles(car.points[camera_pt].vel), f, u };
         return;
     }
-    pos = pos.toward(p, CAM_FILTER_POS);
+    // the position: first moved with the reference vertex's velocity (what
+    // physics added to it this tick), itself filtered, then filtered; plain
+    // IIR would trail behind by about v (1 - k) / k
+    vel = vel.toward(tiles(car.points[camera_pt].vel), CAM_FILTER_VEL);
+    pos = (pos + vel).toward(p, CAM_FILTER_POS);
     fwd = fwd.toward(f, k).normalized();
     up = up.toward(u, k).normalized();
 }
