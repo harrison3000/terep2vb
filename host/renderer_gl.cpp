@@ -35,7 +35,7 @@
         Vec3f vel;                  // its velocity, per tick, filtered
         Vec3f fwd, up;              // where the internal camera looks, and its up
 
-        void step(Car &car, uint16_t camera_pt, int mode);     // one tick; mode: 1 F1, 2 F2
+        void step(Car &car, uint16_t camera_pt, bool up_bias);  // one tick; up_bias: F2
     };
 
     struct carrodef_s{
@@ -46,7 +46,12 @@
 
     carrodef_s carros[5];
     int currTgt = 0;
-    int internalCamMode = 0;
+    // The camera of F1..F5: the low 4 bits the library's mode (RZ_CAMERA_*),
+    // CAM_UP for F2 (the internal one looking a little up, filtered more):
+    // F1 0x01, F2 0x11.
+    constexpr int CAM_UP = 0x10;
+    static int cam_mode = RZ_CAMERA_FOLLOW;
+    static bool cam_internal() { return (cam_mode & 0x0f) == RZ_CAMERA_INTERNAL; }
     static CamFilter cam_filter;
 
     static void updateCars();
@@ -77,6 +82,17 @@
     constexpr float CAM_FILTER_POS = 0.5f;
     constexpr float CAM_FILTER_VEL = 0.20f;  // the reference vertex's velocity, for the position
     constexpr float CAM_UP_BIAS_F2 = 0.7f;  // F2's up leans towards the sky
+
+    // Field of view (vertical, degrees): fixed in the internal cameras; in the
+    // chase camera from FOV_SLOW standing still to FOV_FAST at FOV_FAST_SPEED
+    // (tiles per tick, about 7 tiles a second: fast for the demo's cars) and
+    // over; the other cameras keep the library's default.  Each frame
+    // fov_target is set for the camera and fov_current goes FOV_FILTER of the
+    // way to it (about half a second to settle): no jump in a crash, nor when
+    // changing camera.
+    constexpr float FOV_INTERNAL = 60, FOV_SLOW = 50, FOV_FAST = 80, FOV_DEFAULT = 50;
+    constexpr float FOV_FAST_SPEED = 0.06f, FOV_FILTER = 0.04f;
+    static float fov_target = FOV_SLOW, fov_current = FOV_SLOW;
 
     // b -> a, from the 16.16 positions (any unit: only directions are used)
     static Vec3f delta(const Pos &a, const Pos &b)
@@ -144,6 +160,10 @@ bool opengl_start()
 {
     banner_color = 0;
     fog_changed = true;
+#ifdef TEREP2_GLR
+    cam_mode = RZ_CAMERA_FOLLOW;            // the library's default
+    fov_target = fov_current = FOV_SLOW;
+#endif
 #ifdef TEREP2_GLR
     MapFiles files = map_files(".");        // real paths of the map's files
     MapLayers layers = map_layers();        // height and tile, 256 x 256, change while playing
@@ -232,6 +252,18 @@ static void draw_texts(const PictureRect &at)
     banner_color++;
 }
 
+#ifdef TEREP2_GLR
+// Another camera (F1..F5): the internal camera's filter starts again when
+// the library's mode changes (not from F1 to F2 or back).
+static void set_camera(int c)
+{
+    rzSetCamera(ctx, c & 0x0f);
+    if ((c & 0x0f) != (cam_mode & 0x0f))
+        cam_filter.ready = false;
+    cam_mode = c;
+}
+#endif
+
 // The keys game_frame would handle (keys[0] is the last key pressed); the
 // cameras' keys are the library's business.
 static void game_keys()
@@ -252,40 +284,11 @@ static void game_keys()
         break;
     }
     #ifdef TEREP2_GLR
-    case 59:{ //F1: internal
-        rzSetCamera(ctx, RZ_CAMERA_INTERNAL);
-        if(!internalCamMode){
-            cam_filter.ready = false;
-        }
-        internalCamMode = 1;
-        break;
-    }
-    case 60:{ //F2: internal2
-        rzSetCamera(ctx, RZ_CAMERA_INTERNAL);
-        if(!internalCamMode){
-            cam_filter.ready = false;
-        }
-        internalCamMode = 2;
-        break;
-    }
-    case 61:{ //F3: freeze pos
-        rzSetCamera(ctx, RZ_CAMERA_FOLLOW_FREEZE);
-        internalCamMode = 0;
-        cam_filter.ready = false;
-        break;
-    }
-    case 62:{ //F4: normal
-        rzSetCamera(ctx, RZ_CAMERA_FOLLOW);
-        internalCamMode = 0;
-        cam_filter.ready = false;
-        break;
-    }
-    case 63:{ //F5: overview
-        rzSetCamera(ctx, RZ_CAMERA_OVERVIEW);
-        internalCamMode = 0;
-        cam_filter.ready = false;
-        break;
-    }
+    case 59: set_camera(RZ_CAMERA_INTERNAL); break;             // F1: internal
+    case 60: set_camera(RZ_CAMERA_INTERNAL | CAM_UP); break;    // F2: internal, has a upright bias as the cars rolls
+    case 61: set_camera(RZ_CAMERA_FOLLOW_FREEZE); break;        // F3: the chase camera stops where it is
+    case 62: set_camera(RZ_CAMERA_FOLLOW); break;               // F4: chase
+    case 63: set_camera(RZ_CAMERA_OVERVIEW); break;             // F5: overview
     #endif
     case 0x1a:                              // [ and ]: gravity
         world.gravity += 50;
@@ -300,9 +303,9 @@ static void game_keys()
 #ifdef TEREP2_GLR
 // One step towards the car's current reference vertex and axes (the first
 // one after a reset starts there).
-void CamFilter::step(Car &car, uint16_t camera_pt, int mode)
+void CamFilter::step(Car &car, uint16_t camera_pt, bool up_bias)
 {
-    const float k = mode == 2 ? CAM_FILTER_F2 : CAM_FILTER_F1;
+    const float k = up_bias ? CAM_FILTER_F2 : CAM_FILTER_F1;
     Vec3f p = tiles(car.points[camera_pt].pos);
     // Car::axis_x and axis_y (physics.cpp) in float, from the exact
     // differences of the body vertices 4..7: to the right, and to the front
@@ -311,7 +314,7 @@ void CamFilter::step(Car &car, uint16_t camera_pt, int mode)
     Vec3f r = delta(v[7].pos, v[6].pos).normalized();
     Vec3f f = (delta(v[6].pos, v[4].pos) + delta(v[7].pos, v[5].pos)).normalized();
     Vec3f u = f.cross(r);                               // unit-sized: the bias below is in those units
-    if (mode == 2)
+    if (up_bias)
         u.z += CAM_UP_BIAS_F2;
     u = u.normalized();
 
@@ -336,8 +339,8 @@ void opengl_tick()
 {
 #ifdef TEREP2_GLR
     int ci = world.player_car[0];
-    if (internalCamMode && carros[ci].id >= 0)
-        cam_filter.step(car_get(ci), carros[ci].camera_pt, internalCamMode);
+    if (cam_internal() && carros[ci].id >= 0)
+        cam_filter.step(car_get(ci), carros[ci].camera_pt, cam_mode & CAM_UP);
 #endif
 }
 
@@ -360,7 +363,19 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         updateCamDists();
         if (fog_changed)
             apply_fog();
-        if(internalCamMode){
+        // the field of view (FOV_*): the chase camera's by the speed of its vertex
+        if (cam_internal()) {
+            fov_target = FOV_INTERNAL;
+        } else if (cam_mode == RZ_CAMERA_FOLLOW) {
+            int ci = world.player_car[0];
+            float speed = tiles(car_get(ci).points[carros[ci].camera_pt].vel).length();
+            fov_target = FOV_SLOW + (FOV_FAST - FOV_SLOW) * std::min(speed / FOV_FAST_SPEED, 1.0f);
+        } else {
+            fov_target = FOV_DEFAULT;
+        }
+        fov_current += (fov_target - fov_current) * FOV_FILTER;
+        rzSetCameraFov(ctx, fov_current);
+        if (cam_internal()) {
             // the filtered axes (opengl_tick) of the car the camera is on
             const CamFilter &c = cam_filter;
             if (c.ready) {
@@ -410,7 +425,7 @@ static void updateCars(){
         }
         // the reference vertex (where the camera is): filtered, see opengl_tick;
         // most cars do not use it for any polygon
-        if (internalCamMode && cam_filter.ready && ci == world.player_car[0])
+        if (cam_internal() && cam_filter.ready && ci == world.player_car[0])
             ptrs[carros[ci].camera_pt] = rz(cam_filter.pos);
 
         //TODO review this constant, the limits are 45 deg
