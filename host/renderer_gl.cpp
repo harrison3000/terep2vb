@@ -90,8 +90,8 @@
     // fov_target is set for the camera and fov_current goes FOV_FILTER of the
     // way to it (about half a second to settle): no jump in a crash, nor when
     // changing camera.
-    constexpr float FOV_INTERNAL = 60, FOV_SLOW = 50, FOV_FAST = 80, FOV_DEFAULT = 50;
-    constexpr float FOV_FAST_SPEED = 0.06f, FOV_FILTER = 0.04f;
+    constexpr float FOV_INTERNAL = 60, FOV_SLOW = 50, FOV_FAST = 70, FOV_DEFAULT = 50;
+    constexpr float FOV_FAST_SPEED = 0.1f, FOV_FILTER = 0.04f;
     static float fov_target = FOV_SLOW, fov_current = FOV_SLOW;
 
     // b -> a, from the 16.16 positions (any unit: only directions are used)
@@ -369,7 +369,8 @@ bool opengl_frame(int win_w, int win_h, PictureRect *where)
         } else if (cam_mode == RZ_CAMERA_FOLLOW) {
             int ci = world.player_car[0];
             float speed = tiles(car_get(ci).points[carros[ci].camera_pt].vel).length();
-            fov_target = FOV_SLOW + (FOV_FAST - FOV_SLOW) * std::min(speed / FOV_FAST_SPEED, 1.0f);
+            float spdd = std::min(speed / FOV_FAST_SPEED, 1.0f);
+            fov_target = FOV_SLOW + (FOV_FAST - FOV_SLOW) * spdd * spdd;
         } else {
             fov_target = FOV_DEFAULT;
         }
