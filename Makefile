@@ -5,6 +5,7 @@
 #   make no_gl      the same without the OpenGL renderer (or make sdl NO_GL=1)
 #   make test       replay the Win16 recordings in tests/ and compare the frames
 #   make coverage   which lines of src/ the tests run (clang/LLVM); REPLAY="recdir mapdir": a recording's
+#   make wasm-test  the test host built for WebAssembly (wasm32, WASI) and the replays run on it with node
 #   make -j8 ...    in parallel: every file is its own object in build/
 CXX      ?= c++
 CXXFLAGS ?= -O2 -g
@@ -121,10 +122,37 @@ endif
 	$(LLVM_COV) show $(COV_SHOW) -format=html -show-branches=count -output-dir=build/cov/html > /dev/null
 	@echo "report: build/cov/html/index.html"
 
+# WebAssembly (32 bits): the test host built with clang for wasm32-wasip1 (WASI libc and libc++,
+# no Emscripten) in build/wasm, and the replays run on it with node (tools/wasi_run.mjs).
+WASI_SYSROOT ?= /usr/share/wasi-sysroot
+WASM_CXX     ?= clang++
+WASM_FLAGS   := --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 -std=gnu++17 -fwrapv -fno-exceptions \
+                -Wall -Wno-unused-result
+WASM_OBJ     := $(patsubst build/%,build/wasm/%,$(GAME_OBJ) $(HOST_OBJ) $(TEST_OBJ))
+
+build/wasm/game/%.o: src/%.cpp
+	@mkdir -p $(@D)
+	$(WASM_CXX) $(WASM_FLAGS) $(DEPFLAGS) -c -o $@ $<
+build/wasm/host/%.o: host/%.cpp
+	@mkdir -p $(@D)
+	$(WASM_CXX) $(WASM_FLAGS) $(DEPFLAGS) -c -o $@ $<
+build/wasm/test/%.o: host_test/%.cpp
+	@mkdir -p $(@D)
+	$(WASM_CXX) $(WASM_FLAGS) $(DEPFLAGS) -c -o $@ $<
+build/wasm/terep2-headless.wasm: $(WASM_OBJ)
+	$(WASM_CXX) $(WASM_FLAGS) -o $@ $^
+# run_tests.sh takes a program: this one starts the .wasm with node
+build/wasm/terep2-headless: build/wasm/terep2-headless.wasm tools/wasi_run.mjs
+	printf '#!/bin/sh\nexec node --no-warnings "%s/tools/wasi_run.mjs" "%s/$<" "$$@"\n' "$(CURDIR)" "$(CURDIR)" > $@
+	chmod +x $@
+
+wasm-test: build/wasm/terep2-headless
+	sh tests/run_tests.sh build/wasm/terep2-headless
+
 clean:
 	rm -f terep2vibed terep2-headless
-	rm -rf build/game build/host build/test build/sdl build/imgui build/opl3.o build/opl3.d build/cov
+	rm -rf build/game build/host build/test build/sdl build/imgui build/opl3.o build/opl3.d build/cov build/wasm
 
--include $(wildcard build/*/*.d build/*.d build/imgui/backends/*.d build/cov/*/*.d)
+-include $(wildcard build/*/*.d build/*.d build/imgui/backends/*.d build/cov/*/*.d build/wasm/*/*.d)
 
-.PHONY: all sdl no_gl test coverage clean FORCE
+.PHONY: all sdl no_gl test coverage wasm-test clean FORCE

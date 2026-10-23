@@ -24,6 +24,7 @@ make test       # replays the Win16 recordings in tests/ and compares the frames
 make -j8 all sdl  # in parallel: each source is its own object in build/, rebuilt when its headers change
 make coverage  # which lines of src/ the tests run (clang/LLVM): summary, and build/cov/html
 make coverage REPLAY="rec/dir data/Map"  # the same for one recording only
+make wasm-test  # the test host built for WebAssembly (wasm32-wasip1: clang + wasi-libc/libc++, no Emscripten), replays run with node
 ./terep2vibed              # opens the map chooser where the last map was chosen
 ./terep2vibed data/Asphalt # opens it with that map selected
 ```
