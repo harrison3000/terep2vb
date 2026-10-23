@@ -180,6 +180,7 @@ bool opengl_start()
         SDL_GL_MakeCurrent(w, gui_context());
         return false;
     }
+    rzSetTerrainScale(ctx, 1.0f, 16.0f/255.5f);
     rzSetHeightmap(ctx, layers.height, 256,256);
     rzLoadTileAtlas(ctx, files.maptex.c_str());
     rzSetTileMap(ctx, layers.tile, 256,256);
