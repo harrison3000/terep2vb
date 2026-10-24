@@ -172,7 +172,7 @@ int32_t rzSetFog(RzContext* ctx, float start, float end);
    Os passos 2 e 3 podem vir em qualquer ordem e se repetir; o objeto só é
    desenhado depois da primeira rzUpdateObjectVertices. */
 
-/* Cria um objeto vazio com vertexCount vértices (1 a 65536), ainda sem
+/* Cria um objeto vazio com vertexCount vértices (1 a 256), ainda sem
    polígonos e sem posições (fase de carga: aloca). Devolve o id em outId. */
 int32_t rzCreateObject(RzContext* ctx, int32_t vertexCount, int32_t* outId);
 
@@ -184,7 +184,8 @@ int32_t rzCreateObject(RzContext* ctx, int32_t vertexCount, int32_t* outId);
    do objeto (ver rzLoadObjectTexture), com a luz flat do polígono.
    Triangulado em leque. Com menos de 3 vértices, é ignorado (RZ_OK).
    Erros: RZ_ERR_INVALID_ARG (índice fora do objeto ou paletteIndex fora de
-   0..255; nada é acrescentado), RZ_ERR_SIZE (mais de 65535 polígonos). */
+   0..255; nada é acrescentado), RZ_ERR_SIZE (mais de 65535 polígonos, ou
+   mais de 3072 índices no objeto todo). */
 int32_t rzAddObjectPolygon(RzContext* ctx, int32_t id,
                            const uint16_t* indices, int32_t count,
                            int32_t paletteIndex);

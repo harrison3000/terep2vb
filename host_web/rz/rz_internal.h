@@ -160,12 +160,15 @@ constexpr float   kCascadeFarRecenter   = 10.0f;  // tiles andados até refazer 
 constexpr float   kCascadeFarMargin     = 4.0f;   // tiles além da neblina + recentragem
 constexpr int32_t kShadowScissorMargin  = 4;     // texels em volta da área refeita da cascata 2
 constexpr int32_t kUnitShadowFirst      = 1;      // unidades de textura 1..3 (0: atlas/objeto)
-constexpr int32_t kUnitObjectPositions  = 4;      // objetos: textura das posições
-constexpr int32_t kUnitObjectIndices    = 5;      // objetos: textura dos índices dos polígonos
-// Posições e índices dos objetos em texturas 2D de kRowTexels texels por
-// linha (o elemento i em (i % kRowTexels, i / kRowTexels), como nos shaders)
-constexpr int32_t kRowTexels            = 256;
-inline int32_t rowsFor(int32_t count) { return count > 0 ? (count + kRowTexels - 1) / kRowTexels : 1; }
+// Posições e índices de cada objeto num uniform block (ObjectData, nos
+// shaders object.vert e object_depth.vert, layout std140): kMaxObjectVertices
+// vec4 de posição e depois kMaxObjectIndices int, quatro por ivec4. 16 KB,
+// o mínimo que todo WebGL 2 aceita num bloco.
+constexpr int32_t kMaxObjectVertices    = 256;
+constexpr int32_t kMaxObjectIndices     = 3072;
+constexpr int32_t kObjectIndicesOffset  = kMaxObjectVertices * 16;              // bytes
+constexpr int32_t kObjectDataSize       = kObjectIndicesOffset + kMaxObjectIndices * 4;
+constexpr GLuint  kObjectDataBinding    = 0;      // ponto de ligação do bloco
 constexpr float   kShadowTexturedDim  = 0.48f;  // chão texturizado na sombra (era 0,6; 20 % mais escuro)
 constexpr float   kShadowLight        = kAmbient * 0.8f;   // luz na sombra (cores flat e objetos):
                                                          // 20 % abaixo do ambiente
@@ -301,7 +304,7 @@ struct Object {
     bool      alive   = false;
     bool      positioned = false;   // já recebeu rzUpdateObjectVertices
     bool      gpuDirty   = false;   // cantos/VBO desatualizados (polígonos, linhas): reenviar no próximo frame
-    bool      positionsDirty = false;   // posições novas (rzUpdateObjectVertices): reenviar a textura
+    bool      positionsDirty = false;   // posições novas (rzUpdateObjectVertices): reenviar ao bloco
     int32_t   uploadedSide = 0;     // lado da textura usado no último envio (UV das cores)
     Vec3      center = { 0.0f, 0.0f, 0.0f };   // esfera envolvente (refeita em cada update)
     float     radius = 0.0f;
@@ -315,9 +318,8 @@ struct Object {
     std::vector<ObjectTriangle> triangles; // leque de cada polígono, montado na carga
     std::vector<ObjectLine> lines;        // rzAddObjectLine: prisma fino gerado no envio
     std::vector<ObjectVertex> staging;    // triangles.size() * 3 + lines.size() * kLineVertices
-    std::vector<float>    positionStaging;   // world em vec4, linhas completas de kRowTexels
-    GLuint    positionTexture = 0;  // RGBA32F, um texel por vértice
-    GLuint    indexTexture = 0;     // R16UI, `indices`
+    std::vector<float>    positionStaging;   // world em vec4, para o bloco
+    GLuint    dataBuffer = 0;       // o uniform block do objeto: posições e índices
 
     GLuint    vao = 0;
     GLuint    vbo = 0;
@@ -389,7 +391,7 @@ struct ObjectProgram {
     GLuint program = 0;
     GLint  viewProj = -1, texture = -1, ambient = -1;
     GLint  model = -1;     // uModel: identidade, exceto nas rodas
-    GLint  fromBuffer = -1; // 1: objetos (posições/normais das texturas); 0: faces das rodas
+    GLint  fromBuffer = -1; // 1: objetos (posições/normais do bloco); 0: faces das rodas
     ShadowUniforms shadow;
     FogUniforms    fog;
 };
@@ -433,7 +435,6 @@ struct SpriteVertex {      // 28 bytes; seis por sprite
 struct DepthProgram {
     GLuint program = 0;
     GLint  lightViewProj = -1;
-    GLint  positions = -1;     // só no dos objetos (textura das posições)
     GLint  model = -1;     // uModel: identidade, exceto nas rodas
 };
 
@@ -468,7 +469,7 @@ struct RzContext {
     rz::TerrainProgram terrainProgram;
     rz::ObjectProgram  objectProgram;
     rz::DepthProgram   depthProgram;
-    rz::DepthProgram   objectDepthProgram;   // sombra dos objetos (posição da textura)
+    rz::DepthProgram   objectDepthProgram;   // sombra dos objetos (posição do bloco)
     rz::WallProgram    wallProgram;
     rz::GlassProgram   glassProgram;
     rz::SpriteProgram  spriteProgram;

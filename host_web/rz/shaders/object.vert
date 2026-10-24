@@ -1,8 +1,4 @@
 #version 300 es
-precision highp float;
-precision highp int;
-precision highp sampler2D;   // no vertex shader o padrão é lowp: posições quantizadas
-precision highp usampler2D;
 layout(location = 0) in vec3 aPosition;   // linhas e faces das rodas: posição direta
 layout(location = 1) in vec4 aNormal;     // idem, normal (10 bits por eixo)
 layout(location = 2) in vec2 aUV;
@@ -11,10 +7,11 @@ layout(location = 3) in ivec3 aPolygon;   // objetos: vértice (-1: usa aPositio
 uniform mat4 uViewProj;
 uniform mat4 uModel;                      // identidade; rodas: posição/giro de cada roda
 uniform int  uFromBuffer;                 // 1: objetos (posições em uPositions); 0: faces das rodas
-uniform sampler2D  uPositions;            // posições no mundo dos vértices do objeto
-uniform usampler2D uIndices;              // índices dos polígonos (sem os fechamentos)
-// as duas com kRowTexels (rz_internal.h) texels por linha: o i em (i % 256, i / 256)
-ivec2 at(int i) { return ivec2(i % 256, i / 256); }
+// O bloco do objeto (rz_internal.h: kMaxObjectVertices, kMaxObjectIndices)
+layout(std140) uniform ObjectData {
+    vec4  uPositions[256];                // posições no mundo dos vértices do objeto
+    ivec4 uIndices[768];                  // índices dos polígonos (sem os fechamentos), quatro por ivec4
+};
 uniform mat4 uShadowMatrix[3];            // luz: cascatas 0, 1 e 2
 uniform vec3 uShadowOffset;               // normal offset de cada cascata (mundo)
 uniform vec3  uLight;                     // direção para a luz (normalizada)
@@ -25,8 +22,8 @@ out vec3 vShadow0, vShadow1, vShadow2;
 out vec3 vWorld;                          // para a neblina
 out float vNdotL;                         // normal · luz (sombra no terminador)
 
-vec3 vertexAt(int i) { return texelFetch(uPositions, at(i), 0).xyz; }
-int indexAt(int i) { return int(texelFetch(uIndices, at(i), 0).r); }
+vec3 vertexAt(int i) { return uPositions[i].xyz; }
+int indexAt(int i) { return uIndices[i / 4][i % 4]; }
 
 // Normal de fora do polígono (Newell): uma só para o polígono inteiro, mesmo
 // não plano. No sentido do legado (horário visto de fora), a de Newell aponta

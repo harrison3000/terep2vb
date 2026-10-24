@@ -1,6 +1,4 @@
 #version 300 es
-precision highp float;
-precision highp int;
 layout(location = 0) in vec4 aCenterRadius;
 layout(location = 1) in vec4 aCornerFrame;  // canto x, canto y (-1/+1), quadro, tipo
 layout(location = 2) in vec4 aColor;        // B, G, R, 0 normalizados

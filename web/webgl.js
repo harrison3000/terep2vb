@@ -95,8 +95,6 @@ export function webglImports(canvas, getMemory) {
             else
                 gl.texImage2D(target, level, internal, w, h, border, format, type, null);
         },
-        glTexSubImage2D: (target, level, x, y, w, h, format, type, p) =>
-            gl.texSubImage2D(target, level, x, y, w, h, format, type, ...pixels(type, p)),
         glTexImage3D(target, level, internal, w, h, d, border, format, type, p) {
             if (p)
                 gl.texImage3D(target, level, internal, w, h, d, border, format, type, ...pixels(type, p));
@@ -146,6 +144,8 @@ export function webglImports(canvas, getMemory) {
         glUniform1i: (loc, v) => gl.uniform1i(locations[loc] ?? null, v),
         glUniform1f: (loc, v) => gl.uniform1f(locations[loc] ?? null, v),
         glUniform3f: (loc, x, y, z) => gl.uniform3f(locations[loc] ?? null, x, y, z),
+        glGetUniformBlockIndex: (n, name) => gl.getUniformBlockIndex(obj(n), cstr(name)),
+        glUniformBlockBinding: (n, block, binding) => gl.uniformBlockBinding(obj(n), block, binding),
         glUniformMatrix4fv: (loc, count, transpose, p) =>
             gl.uniformMatrix4fv(locations[loc] ?? null, !!transpose, new Float32Array(buffer()), p >> 2, count * 16),
 
@@ -155,6 +155,7 @@ export function webglImports(canvas, getMemory) {
         glGenBuffers: (n, p) => generate(n, p, () => gl.createBuffer()),
         glDeleteBuffers: (n, p) => remove(n, p, (b) => gl.deleteBuffer(b)),
         glBindBuffer: (target, n) => gl.bindBuffer(target, obj(n)),
+        glBindBufferBase: (target, index, n) => gl.bindBufferBase(target, index, obj(n)),
         glBufferData(target, size, p, usage) {
             if (p)
                 gl.bufferData(target, new Uint8Array(buffer()), usage, p, size);

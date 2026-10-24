@@ -119,8 +119,7 @@ bool createRenderer(RzContext* ctx) {
     glUseProgram(o.program);
     setMatrix(o.model, Mat4::identity());
     glUniform1i(o.fromBuffer, 0);
-    glUniform1i(glGetUniformLocation(o.program, "uPositions"), kUnitObjectPositions);
-    glUniform1i(glGetUniformLocation(o.program, "uIndices"), kUnitObjectIndices);
+    glUniformBlockBinding(o.program, glGetUniformBlockIndex(o.program, "ObjectData"), kObjectDataBinding);
     glUniform1i(o.texture, kUnitAtlas);
     glUniform1f(o.ambient, kShadowLight);
     initShadowUniforms(o.program, o.shadow);
@@ -140,9 +139,8 @@ bool createRenderer(RzContext* ctx) {
     od.program = linkProgram(kObjectDepthVertexShader, kDepthFragmentShader);
     if (!od.program) return false;
     od.lightViewProj = glGetUniformLocation(od.program, "uLightViewProj");
-    od.positions     = glGetUniformLocation(od.program, "uPositions");
     glUseProgram(od.program);
-    glUniform1i(od.positions, kUnitObjectPositions);
+    glUniformBlockBinding(od.program, glGetUniformBlockIndex(od.program, "ObjectData"), kObjectDataBinding);
     if (!createShadowMaps(ctx)) return false;
     if (!createBorder(ctx)) return false;
     if (!createGlassProgram(ctx)) return false;

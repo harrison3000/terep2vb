@@ -41,7 +41,6 @@ constexpr GLenum GL_SRC_ALPHA               = 0x0302;
 constexpr GLenum GL_ONE_MINUS_SRC_ALPHA     = 0x0303;
 constexpr GLenum GL_BYTE                    = 0x1400;
 constexpr GLenum GL_UNSIGNED_BYTE           = 0x1401;
-constexpr GLenum GL_UNSIGNED_SHORT          = 0x1403;
 constexpr GLenum GL_INT                     = 0x1404;
 constexpr GLenum GL_UNSIGNED_INT            = 0x1405;
 constexpr GLenum GL_FLOAT                   = 0x1406;
@@ -49,16 +48,13 @@ constexpr GLenum GL_INT_2_10_10_10_REV      = 0x8D9F;
 constexpr GLenum GL_DEPTH_COMPONENT         = 0x1902;
 constexpr GLenum GL_RED                     = 0x1903;
 constexpr GLenum GL_RGBA                    = 0x1908;
-constexpr GLenum GL_RED_INTEGER             = 0x8D94;
 constexpr GLenum GL_POLYGON_OFFSET_FILL     = 0x8037;
 constexpr GLenum GL_TEXTURE_COMPARE_MODE    = 0x884C;
 constexpr GLenum GL_TEXTURE_COMPARE_FUNC    = 0x884D;
 constexpr GLenum GL_COMPARE_REF_TO_TEXTURE  = 0x884E;
 constexpr GLenum GL_TEXTURE_2D_ARRAY        = 0x8C1A;
 constexpr GLenum GL_R8                      = 0x8229;
-constexpr GLenum GL_R16UI                   = 0x8234;
 constexpr GLenum GL_RGBA8                   = 0x8058;
-constexpr GLenum GL_RGBA32F                 = 0x8814;
 constexpr GLenum GL_DEPTH_COMPONENT24       = 0x81A6;
 constexpr GLenum GL_NEAREST                 = 0x2600;
 constexpr GLenum GL_LINEAR                  = 0x2601;
@@ -74,6 +70,7 @@ constexpr GLenum GL_TEXTURE0                = 0x84C0;
 constexpr GLenum GL_COLOR_BUFFER_BIT        = 0x00004000;
 constexpr GLenum GL_DEPTH_BUFFER_BIT        = 0x00000100;
 constexpr GLenum GL_ARRAY_BUFFER            = 0x8892;
+constexpr GLenum GL_UNIFORM_BUFFER          = 0x8A11;
 constexpr GLenum GL_STATIC_DRAW             = 0x88E4;
 constexpr GLenum GL_DYNAMIC_DRAW            = 0x88E8;
 constexpr GLenum GL_FRAGMENT_SHADER         = 0x8B30;
@@ -114,8 +111,6 @@ RZ_GL(glTexParameteri)  void glTexParameteri(GLenum target, GLenum name, GLint p
 RZ_GL(glTexImage2D)     void glTexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei w,
                                           GLsizei h, GLint border, GLenum format, GLenum type,
                                           const void* data);
-RZ_GL(glTexSubImage2D)  void glTexSubImage2D(GLenum target, GLint level, GLint x, GLint y, GLsizei w,
-                                             GLsizei h, GLenum format, GLenum type, const void* data);
 RZ_GL(glTexImage3D)     void glTexImage3D(GLenum target, GLint level, GLint internalFormat, GLsizei w,
                                           GLsizei h, GLsizei d, GLint border, GLenum format, GLenum type,
                                           const void* data);
@@ -145,6 +140,8 @@ RZ_GL(glGetUniformLocation) GLint glGetUniformLocation(GLuint program, const GLc
 RZ_GL(glUniform1i)         void glUniform1i(GLint loc, GLint v);
 RZ_GL(glUniform1f)         void glUniform1f(GLint loc, GLfloat v);
 RZ_GL(glUniform3f)         void glUniform3f(GLint loc, GLfloat x, GLfloat y, GLfloat z);
+RZ_GL(glGetUniformBlockIndex) GLuint glGetUniformBlockIndex(GLuint program, const GLchar* name);
+RZ_GL(glUniformBlockBinding)  void glUniformBlockBinding(GLuint program, GLuint block, GLuint binding);
 // transpose: sempre GL_FALSE no WebGL (setMatrices, rz_internal.h)
 RZ_GL(glUniformMatrix4fv)  void glUniformMatrix4fv(GLint loc, GLsizei count, GLboolean transpose,
                                                    const GLfloat* v);
@@ -155,6 +152,7 @@ RZ_GL(glBindVertexArray)    void glBindVertexArray(GLuint id);
 RZ_GL(glGenBuffers)         void glGenBuffers(GLsizei n, GLuint* ids);
 RZ_GL(glDeleteBuffers)      void glDeleteBuffers(GLsizei n, const GLuint* ids);
 RZ_GL(glBindBuffer)         void glBindBuffer(GLenum target, GLuint id);
+RZ_GL(glBindBufferBase)     void glBindBufferBase(GLenum target, GLuint index, GLuint id);
 RZ_GL(glBufferData)         void glBufferData(GLenum target, GLsizeiptr size, const void* data, GLenum usage);
 RZ_GL(glBufferSubData)      void glBufferSubData(GLenum target, GLintptr offset, GLsizeiptr size,
                                                  const void* data);

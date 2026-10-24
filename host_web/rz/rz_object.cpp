@@ -11,12 +11,12 @@
 // zero, sempre o nível 0 do mipmap. Como a posição do bloco depende do lado
 // da textura, esses UVs são calculados no envio ao VBO.
 // Os cantos dos triângulos (VBO) são estáticos: vértice do objeto, polígono e
-// UV. As posições ficam numa textura (RGBA32F) e os índices dos polígonos em
-// outra (R16UI), kRowTexels por linha; o vertex shader busca a posição do canto e
+// UV. As posições e os índices dos polígonos ficam num uniform block do
+// objeto (ObjectData, kObjectDataSize); o vertex shader busca a posição do canto e
 // calcula a normal de Newell do polígono inteiro (luz flat por polígono, mesmo
 // não plano). As linhas (rzAddObjectLine) têm posição e normal diretas.
 // Update (rzUpdateObjectVertices): passa as posições (tiles) para o mundo e
-// refaz a esfera envolvente; no frame, só a textura das posições (e as
+// refaz a esfera envolvente; no frame, só as posições do bloco (e as
 // linhas) é reenviado.
 // Frame (drawObjects): um glDrawArrays por objeto visível.
 
@@ -29,8 +29,6 @@ using namespace rz;
 
 namespace {
 
-constexpr int32_t  kMaxObjectVertices = 65536;              // índice uint16
-
 bool validId(const RzContext* ctx, int32_t id) {
     return ctx && id >= 0 && id < int32_t(ctx->objects.size()) && ctx->objects[id].alive;
 }
@@ -40,8 +38,7 @@ void freeObject(Object& o) {
     if (o.texture) glDeleteTextures(1, &o.texture);
     if (o.vbo) glDeleteBuffers(1, &o.vbo);
     if (o.vao) glDeleteVertexArrays(1, &o.vao);
-    if (o.positionTexture) glDeleteTextures(1, &o.positionTexture);
-    if (o.indexTexture) glDeleteTextures(1, &o.indexTexture);
+    if (o.dataBuffer) glDeleteBuffers(1, &o.dataBuffer);
     freeGlass(o);
     freeWheels(o);
     o = Object{};
@@ -126,11 +123,10 @@ void resizeObjectBuffers(Object& o) {
     glBindBuffer(GL_ARRAY_BUFFER, o.vbo);
     glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(o.staging.size() * sizeof(ObjectVertex)),
                  nullptr, GL_STATIC_DRAW);
-    std::vector<uint16_t> rows(size_t(rowsFor(int32_t(o.indices.size()))) * kRowTexels, 0);
-    std::copy(o.indices.begin(), o.indices.end(), rows.begin());
-    glBindTexture(GL_TEXTURE_2D, o.indexTexture);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_R16UI, kRowTexels, rowsFor(int32_t(o.indices.size())), 0,
-                 GL_RED_INTEGER, GL_UNSIGNED_SHORT, rows.data());
+    const std::vector<int32_t> indices(o.indices.begin(), o.indices.end());   // int no bloco
+    glBindBuffer(GL_UNIFORM_BUFFER, o.dataBuffer);
+    glBufferSubData(GL_UNIFORM_BUFFER, kObjectIndicesOffset, GLsizeiptr(indices.size() * sizeof(int32_t)),
+                    indices.data());
     o.gpuDirty = true;
 }
 
@@ -169,24 +165,13 @@ void uploadLines(Object& o, int32_t side) {
                     GLsizeiptr((o.staging.size() - first) * sizeof(ObjectVertex)), o.staging.data() + first);
 }
 
-// Posições no mundo -> a textura das posições (vec4 por vértice)
+// Posições no mundo -> o bloco do objeto (vec4 por vértice)
 void uploadPositions(Object& o) {
     float* p = o.positionStaging.data();
     for (const Vec3& w : o.world) { *p++ = w.x; *p++ = w.y; *p++ = w.z; *p++ = 1.0f; }
-    glBindTexture(GL_TEXTURE_2D, o.positionTexture);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kRowTexels, rowsFor(o.vertexCount()), GL_RGBA, GL_FLOAT,
+    glBindBuffer(GL_UNIFORM_BUFFER, o.dataBuffer);
+    glBufferSubData(GL_UNIFORM_BUFFER, 0, GLsizeiptr(o.positionStaging.size() * sizeof(float)),
                     o.positionStaging.data());
-}
-
-// Textura de dados (posições, índices): lida com texelFetch, sem filtro
-GLuint createDataTexture(GLint internalFormat, int32_t rows, GLenum format, GLenum type, const void* data) {
-    GLuint texture = 0;
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, kRowTexels, rows, 0, format, type, data);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    return texture;
 }
 
 // Layout de ObjectVertex: posição/normal/UV nos atributos 0..2 (como
@@ -204,13 +189,9 @@ void setObjectBufferLayout() {
     glEnableVertexAttribArray(3);
 }
 
-// Liga as texturas de posições e índices do objeto nas unidades delas e volta à 0
+// Liga o bloco do objeto (posições e índices) para os shaders
 void bindObjectBuffers(const Object& o) {
-    glActiveTexture(GL_TEXTURE0 + GLenum(kUnitObjectPositions));
-    glBindTexture(GL_TEXTURE_2D, o.positionTexture);
-    glActiveTexture(GL_TEXTURE0 + GLenum(kUnitObjectIndices));
-    glBindTexture(GL_TEXTURE_2D, o.indexTexture);
-    glActiveTexture(GL_TEXTURE0);
+    glBindBufferBase(GL_UNIFORM_BUFFER, kObjectDataBinding, o.dataBuffer);
 }
 
 // Corpo comum de rzAddObjectPolygon (indices, cor = paletteIndex) e
@@ -233,6 +214,7 @@ int32_t addPolygon(RzContext* ctx, int32_t id, const uint16_t* indices, const Rz
     }
     if (n < 3) return RZ_OK;                                  // degenerado: ignorado
     if (o.polygonStart.size() >= 65535) return RZ_ERR_SIZE;  // polígono do triângulo é uint16
+    if (o.indices.size() + size_t(n) > size_t(kMaxObjectIndices)) return RZ_ERR_SIZE;   // não cabe no bloco
 
     // Cópia dos índices e UVs, e leque (fase de carga: os vetores crescem aqui)
     const uint16_t polygon = uint16_t(o.polygonStart.size());
@@ -311,7 +293,7 @@ void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId,
     auto selected = [&](int32_t id, const Object& o) {
         return drawable(o) && !(onlyId >= 0 && id != onlyId) && id != skipId && objectInRange(ctx, o);
     };
-    // Objetos: programa próprio (posição da textura)
+    // Objetos: programa próprio (posição do bloco)
     glUseProgram(ctx->objectDepthProgram.program);
     setMatrix(ctx->objectDepthProgram.lightViewProj, lightViewProj);
     for (int32_t id = 0; id < int32_t(ctx->objects.size()); ++id) {
@@ -381,7 +363,7 @@ int32_t rzCreateObject(RzContext* ctx, int32_t vertexCount, int32_t* outId) {
 
     Object& o = ctx->objects[id];
     o.world.assign(size_t(vertexCount), Vec3{ 0.0f, 0.0f, 0.0f });
-    o.positionStaging.assign(size_t(rowsFor(vertexCount)) * kRowTexels * 4, 0.0f);
+    o.positionStaging.assign(size_t(vertexCount) * 4, 0.0f);
 
     // Vertex buffer (vazio até o primeiro polígono): cantos (ObjectVertex)
     glGenVertexArrays(1, &o.vao);
@@ -391,12 +373,10 @@ int32_t rzCreateObject(RzContext* ctx, int32_t vertexCount, int32_t* outId) {
     setObjectBufferLayout();
     glBindVertexArray(0);
 
-    // Texturas de dados: posições (tamanho fixo) e índices dos polígonos
-    // (refeita quando eles crescem, resizeObjectBuffers)
-    o.positionTexture = createDataTexture(GL_RGBA32F, rowsFor(vertexCount), GL_RGBA, GL_FLOAT,
-                                          o.positionStaging.data());
-    o.indexTexture = createDataTexture(GL_R16UI, 1, GL_RED_INTEGER, GL_UNSIGNED_SHORT, nullptr);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    // O bloco: posições (a cada update) e índices dos polígonos (resizeObjectBuffers)
+    glGenBuffers(1, &o.dataBuffer);
+    glBindBuffer(GL_UNIFORM_BUFFER, o.dataBuffer);
+    glBufferData(GL_UNIFORM_BUFFER, kObjectDataSize, nullptr, GL_DYNAMIC_DRAW);
 
     o.alive      = true;
     o.positioned = false;

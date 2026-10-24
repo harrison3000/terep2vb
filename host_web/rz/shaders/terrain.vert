@@ -1,6 +1,4 @@
 #version 300 es
-precision highp float;
-precision highp int;
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec4 aColor;      // B, G, R, 0 normalizados
 layout(location = 2) in vec4 aUvLayer;    // u, v em {0, 1}; bloco 0..255; -
