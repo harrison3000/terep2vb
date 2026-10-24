@@ -4,7 +4,7 @@
 	shallow = true
 [submodule "host/Nuked-OPL3"]
 	path = host/Nuked-OPL3
-	url = https://github.com/nukeykt/Nuked-OPL3
+	url = https://github.com/tgies/Nuked-OPL3-fast
 	shallow = true
 [submodule "host/renderizeitor"]
 	path = host/renderizeitor
