@@ -5,6 +5,7 @@
 #   make no_gl      the same without the OpenGL renderer (or make sdl NO_GL=1)
 #   make test       replay the Win16 recordings in tests/ and compare the frames
 #   make coverage   which lines of src/ the tests run (clang/LLVM); REPLAY="recdir mapdir": a recording's
+#   make web        the game as a web page (web/terep2.wasm; serve web/ and open it)
 #   make wasm-test  the test host built for WebAssembly (wasm32, WASI) and the replays run on it with node
 #   make -j8 ...    in parallel: every file is its own object in build/
 CXX      ?= c++
@@ -146,13 +147,24 @@ build/wasm/terep2-headless: build/wasm/terep2-headless.wasm tools/wasi_run.mjs
 	printf '#!/bin/sh\nexec node --no-warnings "%s/tools/wasi_run.mjs" "%s/$<" "$$@"\n' "$(CURDIR)" "$(CURDIR)" > $@
 	chmod +x $@
 
+# The web page (web/): the game as a WebAssembly "reactor" for the browser, with web/web_main.cpp
+# as its host.  Serve the folder (python3 -m http.server -d web) and open it.
+WEB_OBJ      := $(patsubst build/%,build/wasm/%,$(GAME_OBJ)) build/wasm/web/web_main.o
+build/wasm/web/%.o: web/%.cpp
+	@mkdir -p $(@D)
+	$(WASM_CXX) $(WASM_FLAGS) $(DEPFLAGS) -c -o $@ $<
+web/terep2.wasm: $(WEB_OBJ)
+	$(WASM_CXX) $(WASM_FLAGS) -mexec-model=reactor -Wl,--strip-debug -o $@ $^
+web: web/terep2.wasm
+
 wasm-test: build/wasm/terep2-headless
 	sh tests/run_tests.sh build/wasm/terep2-headless
 
 clean:
 	rm -f terep2vibed terep2-headless
 	rm -rf build/game build/host build/test build/sdl build/imgui build/opl3.o build/opl3.d build/cov build/wasm
+	rm -f web/terep2.wasm
 
 -include $(wildcard build/*/*.d build/*.d build/imgui/backends/*.d build/cov/*/*.d build/wasm/*/*.d)
 
-.PHONY: all sdl no_gl test coverage wasm-test clean FORCE
+.PHONY: all sdl no_gl test coverage web wasm-test clean FORCE

@@ -95,6 +95,21 @@ and kept in `extra_options`, which the map chooser shows as checkboxes:
 | `fix-ice-bug` | broken ice no longer wraps around to the highest terrain (see below) |
 | `hide-banner` | hides the "GAMBIARRA FOREVER!" line that the Win16 port draws at the bottom |
 
+### In a web page
+
+`make web` builds the game as WebAssembly (`web/terep2.wasm`, about 120 KB: clang for
+wasm32-wasip1 with the WASI libc and libc++, no Emscripten) with its own small host,
+`web/web_main.cpp`. The page (`web/index.html`, `web/terep2.js`) asks for a folder, finds the maps
+in it and reads their files right there in the browser (nothing is uploaded), then runs the game
+on a canvas with the keyboard, physics at 120 Hz and the picture at 60 Hz as in the SDL host. The
+page needs to be served, not opened as a file:
+
+    make web && python3 -m http.server -d web
+
+and then http://localhost:8000. For now: the software renderer only, no sound, no map preview;
+Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
+the replays give the same frames as the Win16 port there too.
+
 ### Higher resolution
 
 The render scale N (the chooser, the Esc menu; `-s N` in the test host) renders at 320·N x 200·N. Scale 1 is the original, byte for byte. At
@@ -167,6 +182,7 @@ host/
   minimap.cpp   the optional minimap drawn over the game's picture
   imgui/        Dear ImGui (git submodule)
   Nuked-OPL3/   OPL3 emulator (git submodule, LGPL 2.1)
+web/            the game in a web page: web_main.cpp (its host, WebAssembly), index.html, terep2.js
 host_test/      the test host (terep2-headless)
   main.cpp      replays a recording of the Win16 port and compares the frames
 data/           the maps (not in the repository)
