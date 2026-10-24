@@ -373,6 +373,19 @@ if (touchScreen) {
     $('back').addEventListener('click', () => { if (playing) stop(); });
 }
 
+// Full screen on a touch screen (on a computer there is F11), where the
+// browser has it (not iPhone Safari): the whole page, so the controls and the
+// minimap stay; the canvas follows (resize).
+if (touchScreen && document.fullscreenEnabled) {
+    $('fullscreen').hidden = false;
+    $('fullscreen').addEventListener('click', () => {
+        if (document.fullscreenElement)
+            document.exitFullscreen();
+        else
+            document.documentElement.requestFullscreen().catch(() => {});
+    });
+}
+
 addEventListener('keydown', (e) => key(e, false));
 addEventListener('keyup', (e) => key(e, true));
 $('folder').onchange = () => {

@@ -32,6 +32,7 @@
   #touch .cam   { right: 3vmin; top: 3vmin; }
   #touch .back  { left: 50%; top: 3vmin; transform: translateX(-50%); width: 11vmin; height: 11vmin; }
   body.touch #minimap { bottom: auto; top: 22vmin; }
+  #touch .full  { right: 22vmin; top: 3vmin; }
 </style>
 </head>
 <body>
@@ -77,6 +78,7 @@
     <button class="jump1" data-sc="2" aria-label="Jump (1)">1</button>
     <button class="jump2" data-sc="3" aria-label="Jump (2)">2</button>
     <button class="cam" id="camera" aria-label="Next camera">🎥</button>
+    <button class="full" id="fullscreen" aria-label="Full screen" hidden>⛶</button>
     <button class="back" id="back" aria-label="Back to the maps">✕</button>
   </div></div>
 <script type="module" src="terep2.js"></script>
