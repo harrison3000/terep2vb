@@ -132,7 +132,7 @@ static void apply_fog()
     fog_changed = false;
 }
 
-static int canvas_height;                  // for the text
+static int canvas_width, canvas_height;    // for the text
 
 bool gl_start(int width, int height, int quality)
 {
@@ -141,6 +141,7 @@ bool gl_start(int width, int height, int quality)
     cam_mode = RZ_CAMERA_FOLLOW;            // the library's default
     fov_target = fov_current = FOV_SLOW;
 
+    canvas_width = width;
     canvas_height = height;
     // the shadows, the GPU's heaviest work: high, three maps of 2048 (the
     // library's); medium, one of 2048 up to 25 tiles; low, one of 512 up to 20
@@ -190,8 +191,11 @@ bool gl_start(int width, int height, int quality)
 }
 
 // game_frame's text, in the page's font: at (x, y) of the original 320 x 200
-// screen, in palette colour colour; k canvas pixels per pixel of the picture.
-static void draw_text(float k, const char *s, int x, int y, uint8_t colour)
+// screen, in palette colour colour.  That screen is fitted in the canvas and
+// centred across, whatever the canvas's shape; the text of its top half stays
+// at the canvas's top, that of the bottom half at its bottom (on a tall
+// phone screen they do not end up in the middle).
+static void draw_text(const char *s, int x, int y, uint8_t colour)
 {
     std::string text;
     for (; *s && *s != 13; s++)
@@ -199,20 +203,22 @@ static void draw_text(float k, const char *s, int x, int y, uint8_t colour)
             s++;                            // a colour change: ignored
         else
             text += *s == 9 ? ' ' : *s;
-    const float px = k * render_scale;      // canvas pixels per pixel of the original
-    web_text(x * px, (y - 2) * px, 7.5f * px, host_palette(colour), text.c_str());
+    const float px = std::min(canvas_width / 320.0f, canvas_height / 200.0f);   // canvas pixels per pixel of the original
+    const float left = (canvas_width - 320 * px) / 2;
+    const float top = y < 100 ? (y - 2) * px : canvas_height - (200 - (y - 2)) * px;
+    web_text(left + x * px, top, 7.5f * px, host_palette(colour), text.c_str());
 }
 
-static void draw_texts(float k)
+static void draw_texts()
 {
-    draw_text(k, title_text, 10, 10, 15);
-    draw_text(k, subtitle_text, 100, 190, 15);
+    draw_text(title_text, 10, 10, 15);
+    draw_text(subtitle_text, 100, 190, 15);
     if (!extra_options.hide_banner) {
         const char *banner = draw_distance <= DRAW_DISTANCE_MIN ? "Silent Terep2"
                            : draw_distance >= DRAW_DISTANCE_MAX ? "Terep2:\nDefinitive Edition"
                                                                 : "GAMBIARRA FOREVER!";
         bool longer = draw_distance >= DRAW_DISTANCE_MAX;       // would run into the subtitle
-        draw_text(k, banner, 5, longer ? 181 : 190, (uint8_t)(banner_color >> 2));
+        draw_text(banner, 5, longer ? 181 : 190, (uint8_t)(banner_color >> 2));
     }
     banner_color++;
 }
@@ -301,6 +307,7 @@ void gl_tick()
 
 void gl_resize(int width, int height)
 {
+    canvas_width = width;
     canvas_height = height;
     rzSetSize(ctx, width, height);
 }
@@ -344,8 +351,7 @@ void gl_frame()
 
     rzRender(ctx);
 
-    // the text from the left edge, as the library fills the canvas
-    draw_texts((float)canvas_height / screen_h());
+    draw_texts();
 }
 
 void gl_stop()
