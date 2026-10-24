@@ -10,7 +10,7 @@
  * at 60 Hz.  Sound: the game's AdLib writes go to the Nuked-OPL3 emulator,
  * whose samples, made as the time advances, the page plays (web_audio_*).
  * The minimap: the map's picture (web_minimap) and where the cars are
- * (web_car_*).  Or the OpenGL renderer (gl_renderer.cpp and web/rz) draws
+ * (web_car_*).  Or the OpenGL renderer (gl_renderer.cpp and rz/) draws
  * the frame itself with WebGL 2 on the page's canvas (web/webgl.js), and the
  * page draws its text (web_text_*).  See web/terep2.js.
  */

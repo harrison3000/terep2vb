@@ -1,7 +1,8 @@
 /*
  * The page's OpenGL renderer: the game's side of the renderizeitor library
- * (web/rz, WebGL 2 on the page's canvas), which once was the SDL host's.  The library draws the map and the cars its own way, with
- * its own camera and textures; the game's own drawing (game_frame) is not
+ * (rz/, WebGL 2 on the page's canvas), which once was the SDL host's.  The
+ * library draws the map and the cars its own way, with its own camera and
+ * textures; the game's own drawing (game_frame) is not
  * called, so what game_frame does besides drawing is done here: the engine
  * sound, the keys that change the game (Tab, Q, [, ], F9) and the text, which
  * the page draws over the canvas (web_text).

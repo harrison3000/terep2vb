@@ -1,4 +1,4 @@
-// The web host's page side, an ES module (see web_main.cpp): picks a map folder (read
+// The web host's page side, an ES module (see host_web/web_main.cpp): picks a map folder (read
 // locally, nothing is uploaded), runs the game in terep2.wasm and draws it: the game's own
 // picture on a 2D canvas, or the OpenGL renderer's with WebGL 2 (webgl.js) and its text over it.
 import { webglImports } from './webgl.js';
@@ -24,7 +24,7 @@ const SCANCODES = {
 };
 
 // The little of WASI the module uses: printing (to the console), nothing else
-// (no directories: the files are in the module's memory, see web_main.cpp).
+// (no directories: the files are in the module's memory, see host_web/web_main.cpp).
 function wasiImports(getMemory) {
     const lines = { 1: '', 2: '' };
     return {

@@ -87,7 +87,7 @@ and kept in `extra_options`, which the map chooser shows as checkboxes:
 
 `make web` builds the game as WebAssembly (`web/terep2.wasm`, about 300 KB: clang for
 wasm32-wasip1 with the WASI libc and libc++, no Emscripten) with its own small host,
-`web/web_main.cpp`. The page (`web/index.html`, `web/terep2.js`) asks for a folder, finds the maps
+`host_web/web_main.cpp`. The page (`web/index.html`, `web/terep2.js`: `web/` is only what is served) asks for a folder, finds the maps
 in it and reads their files right there in the browser (nothing is uploaded), then runs the game
 on a canvas with the keyboard, physics at 120 Hz and the picture at 60 Hz as in the SDL host. The
 page needs to be served, not opened as a file:
@@ -97,7 +97,7 @@ page needs to be served, not opened as a file:
 and then http://localhost:8000. The sound is the same AdLib emulation (Nuked-OPL3, in the module
 too, played through an AudioWorklet), and there is the same minimap, in the bottom right corner
 of the window. Both renderers: the software one, and the OpenGL one, drawn with WebGL 2:
-`web/gl_renderer.cpp` (the game's side) and `web/rz`, the renderer itself (from Harrison's
+`host_web/gl_renderer.cpp` (the game's side) and `host_web/rz`, the renderer itself (from Harrison's
 [renderizeitor](https://github.com/harrison3000/renderizeitor): GLSL ES 3.00 shaders, PCX files
 from memory, the page's canvas), whose WebGL calls are imports of the module done one for one by
 `web/webgl.js`. The page draws the text over it; the draw distance (where the fog starts, 1 to
@@ -174,8 +174,10 @@ host/
   minimap.cpp   the optional minimap drawn over the game's picture
   imgui/        Dear ImGui (git submodule)
   Nuked-OPL3/   OPL3 emulator (git submodule, LGPL 2.1)
-web/            the game in a web page: web_main.cpp (its host, WebAssembly), index.html, terep2.js,
-                gl_renderer.cpp, rz/ and webgl.js (the OpenGL renderer with WebGL 2)
+host_web/       the web host (WebAssembly): web_main.cpp, and the OpenGL renderer with WebGL 2,
+                gl_renderer.cpp and rz/ (the renderer)
+web/            the web page, what is served: index.html, terep2.js, webgl.js, opl_player.js and,
+                once built, terep2.wasm
 host_test/      the test host (terep2-headless)
   main.cpp      replays a recording of the Win16 port and compares the frames
 data/           the maps (not in the repository)

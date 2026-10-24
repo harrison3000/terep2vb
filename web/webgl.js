@@ -1,5 +1,5 @@
 // WebGL 2 for terep2.wasm's OpenGL renderer: the imports of its module "gl"
-// (web/rz/rz_gl.h), each the WebGL call of the same name, on a canvas.  The
+// (host_web/rz/rz_gl.h), each the WebGL call of the same name, on a canvas.  The
 // module names WebGL's objects (textures, buffers...) by numbers, as OpenGL
 // does, kept here with the objects; pointers are offsets in its memory.
 

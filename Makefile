@@ -132,21 +132,21 @@ build/wasm/terep2-headless: build/wasm/terep2-headless.wasm tools/wasi_run.mjs
 	printf '#!/bin/sh\nexec node --no-warnings "%s/tools/wasi_run.mjs" "%s/$<" "$$@"\n' "$(CURDIR)" "$(CURDIR)" > $@
 	chmod +x $@
 
-# The web page (web/): the game as a WebAssembly "reactor" for the browser, with web/web_main.cpp
-# as its host.  Serve the folder (python3 -m http.server -d web) and open it.
-# The OpenGL renderer there: web/gl_renderer.cpp and web/rz, the web's own copy of the renderizeitor
-# (WebGL 2, its calls imports of the module done by web/webgl.js); the submodule is not used.
+# The web page (web/, what is served): the game as a WebAssembly "reactor" for the browser, with
+# host_web/web_main.cpp as its host.  Serve the folder (python3 -m http.server -d web) and open it.
+# The OpenGL renderer there: host_web/gl_renderer.cpp and host_web/rz, the web's own copy of the
+# renderizeitor (WebGL 2, its calls imports of the module done by web/webgl.js).
 WASM_CC      ?= clang
-RZ_WEB_OBJ   := $(patsubst web/rz/%.cpp,build/wasm/rz/%.o,$(wildcard web/rz/*.cpp))
+RZ_WEB_OBJ   := $(patsubst host_web/rz/%.cpp,build/wasm/rz/%.o,$(wildcard host_web/rz/*.cpp))
 RZ_WEB_FLAGS := --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 -std=c++23 -fno-exceptions -fno-rtti \
                 -Wall -Wextra -Wno-c23-extensions
 WEB_OBJ      := $(patsubst build/%,build/wasm/%,$(GAME_OBJ)) build/wasm/web/web_main.o \
                 build/wasm/web/gl_renderer.o build/wasm/opl3.o $(RZ_WEB_OBJ)
 build/wasm/web/gl_renderer.o: WEB_WARN := -Wno-vla-cxx-extension -Wno-missing-braces
-build/wasm/web/%.o: web/%.cpp | $(OPL3)/opl3.h
+build/wasm/web/%.o: host_web/%.cpp | $(OPL3)/opl3.h
 	@mkdir -p $(@D)
 	$(WASM_CXX) $(WASM_FLAGS) $(WEB_WARN) -I$(OPL3) $(DEPFLAGS) -c -o $@ $<
-build/wasm/rz/%.o: web/rz/%.cpp
+build/wasm/rz/%.o: host_web/rz/%.cpp
 	@mkdir -p $(@D)
 	$(WASM_CXX) $(RZ_WEB_FLAGS) $(DEPFLAGS) -c -o $@ $<
 build/wasm/opl3.o: $(OPL3)/opl3.c | $(OPL3)/opl3.h
