@@ -53,7 +53,7 @@ static void updateCars();
 static int isLine(uint16_t[], int);
 static void loadCar(int);
 static void updateSprites();
-static void updateCamDists();
+static void updateCamDists(float frames);
 
 #define F_8_24(_val) ({ \
     const float scale = 1.0f / (float)(1 << 24); \
@@ -312,7 +312,7 @@ void gl_resize(int width, int height)
     rzSetSize(ctx, width, height);
 }
 
-void gl_frame()
+void gl_frame(float frames)
 {
     game_keys();
     engine_sound(world.player_car[0], 0);      // what draw_view does for the sound
@@ -324,7 +324,7 @@ void gl_frame()
     
     updateCars();
     updateSprites();
-    updateCamDists();
+    updateCamDists(frames);
     if (fog_changed)
         apply_fog();
     // the field of view (FOV_*): the chase camera's by the speed of its vertex
@@ -338,7 +338,7 @@ void gl_frame()
     } else {
         fov_target = FOV_DEFAULT;
     }
-    fov_current += (fov_target - fov_current) * FOV_FILTER;
+    fov_current += (fov_target - fov_current) * (1 - std::pow(1 - FOV_FILTER, frames));  // FOV_FILTER a 60 Hz
     rzSetCameraFov(ctx, fov_current);
     if (cam_internal()) {
         // the filtered axes (gl_tick) of the car the camera is on
@@ -349,7 +349,7 @@ void gl_frame()
         }
     }
 
-    rzRender(ctx);
+    rzRender(ctx, frames);
 
     draw_texts();
 }
@@ -569,21 +569,23 @@ static void updateSprites(){
     rzSetSprites(ctx,spr,n_sprites);
 }
 
-static void updateCamDists(){
+// 0.04 tiles per frame of 60 Hz while the key is held: frames of them
+static void updateCamDists(float frames){
     static float camD = 3.0f;
     static float camH = 1.0f;
+    const float step = 0.04f * frames;
 
     if((keys[78] & 0x80) == 0){//plus
-        camH += 0.04f;
+        camH += step;
         camH = fminf(camH, 12.0f);
     }else if((keys[74] & 0x80) == 0){ //minus
-        camH -= 0.04f;
+        camH -= step;
         camH = fmaxf(camH, 0.5f);
     }else if((keys[53] & 0x80) == 0){  // /
-        camD += 0.04f;
+        camD += step;
         camD = fminf(camD, 10.0f);
     }else if((keys[55] & 0x80) == 0){ //asterisk
-        camD -= 0.04f;
+        camD -= step;
         camD = fmaxf(camD, 0.5f);
     } else{
         return;

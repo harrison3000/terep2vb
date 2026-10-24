@@ -16,6 +16,6 @@ bool gl_start(int width, int height,    // after game_init, the canvas's size in
               int quality);             // 0 high, 1 medium, 2 low; false: cannot (no WebGL 2, the map's files)
 void gl_resize(int width, int height);  // the canvas's size changed
 void gl_tick();                         // after each physics tick
-void gl_frame();                        // a frame
+void gl_frame(float frames);            // a frame, frames of 60 Hz after the last one
 void gl_stop();                         // before the game's memory is freed
 void gl_set_draw_distance(int tiles);   // where the fog starts: DRAW_DISTANCE_MIN..MAX; any time

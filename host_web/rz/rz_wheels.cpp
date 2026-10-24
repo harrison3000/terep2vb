@@ -289,7 +289,7 @@ void freeWheels(Object& o) {
 void prepareWheels(RzContext* ctx, Object& o) {
     if (o.wheelStaging.empty() || !o.positioned) return;
     if (o.wheelSpeed != 0.0f) {
-        const float dist = o.wheelSpeed * ctx->cellSize;       // tiles/frame -> mundo
+        const float dist = o.wheelSpeed * ctx->cellSize * ctx->frameStep;   // tiles/frame -> mundo, neste frame
         for (int32_t i = 0; i < 4; ++i) {
             o.wheelRoll[i] -= dist / (0.5f * o.wheelDiameter[i]);   // -: topo vai para a frente
             o.wheelRoll[i] = fmodf(o.wheelRoll[i], 2.0f * kPi);

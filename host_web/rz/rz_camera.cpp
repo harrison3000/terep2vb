@@ -57,18 +57,19 @@ float groundHeight(const RzContext* ctx, float x, float z) {
     return (top + (bot - top) * fz) * ctx->heightScale;
 }
 
-// Câmera "na corda": avança o estado da câmera de perseguição um frame.
+// Câmera "na corda": avança o estado da câmera de perseguição um passo de
+// `frames` frames de 60 Hz (os amortecimentos por stepFraction).
 //   - horizontal: se o alvo passa do comprimento da corda, a câmera é puxada
 //     até a distância da corda (fica para trás, na direção de onde veio); se
 //     chega perto demais, recua. Entre os dois, a corda está frouxa e a câmera
 //     não se mexe. O movimento até a posição desejada é amortecido.
 //   - vertical: busca ficar `followHeight` acima do alvo, também amortecida, e
 //     nunca abaixo do chão.
-void updateFollowCamera(RzContext* ctx, Vec3 target) {
+void updateFollowCamera(RzContext* ctx, Vec3 target, float frames) {
     const float cs = ctx->cellSize;
     const float rope = ctx->followDistance * cs;
     const float minRope = 0.5f * rope;
-    const float k = ctx->followStiffness;
+    const float k = stepFraction(ctx->followStiffness, frames);
 
     if (!ctx->followInitialized) {
         // Começa no lado +z do alvo (o mesmo da visão geral), já na posição
@@ -115,7 +116,7 @@ void updateFollowCamera(RzContext* ctx, Vec3 target) {
     const float ground = groundHeight(ctx, eye.x, eye.z);
     float wantY = target.y + ctx->followHeight * cs;
     if (wantY < ground + kFollowClearance * cs) wantY = ground + kFollowClearance * cs;
-    const float kY = (wantY > eye.y && k < kFollowClimb) ? kFollowClimb : k;
+    const float kY = (wantY > eye.y && ctx->followStiffness < kFollowClimb) ? stepFraction(kFollowClimb, frames) : k;
     eye.y += (wantY - eye.y) * kY;
     if (eye.y < ground + kFollowMinClearance * cs) eye.y = ground + kFollowMinClearance * cs;
 
@@ -166,14 +167,14 @@ void startRetarget(RzContext* ctx, Vec3 target) {
 
 // Um frame da transição. O destino acompanha o alvo (ele pode estar andando).
 void updateRetarget(RzContext* ctx, Vec3 target) {
-    float t = ctx->retargetT + ctx->retargetStep;
+    float t = ctx->retargetT + ctx->retargetStep * ctx->frameStep;
     if (t > 1.0f) t = 1.0f;
     ctx->retargetT = t;
     const float e = t * t * (3.0f - 2.0f * t);                  // smoothstep
 
     if (!ctx->retargetArc) {
         ctx->followLook = lerp3(ctx->retargetLook0, target, e);
-        updateFollowCamera(ctx, ctx->followLook);               // a corda traz a câmera
+        updateFollowCamera(ctx, ctx->followLook, ctx->frameStep); // a corda traz a câmera
     } else {
         // O olhar vai na frente do olho (chega no alvo com 2/3 do voo): no alto
         // do arco a câmera olha adiante e para baixo, não para o próprio pé
@@ -199,7 +200,7 @@ float smooth01(float t) {
 // Avança a transição de/para a visão geral um frame; devolve o progresso
 // suavizado e o cru (t) em *rawT.
 float stepOverview(RzContext* ctx, float* rawT) {
-    float t = ctx->overviewT + 1.0f / kOverviewFrames;
+    float t = ctx->overviewT + ctx->frameStep / kOverviewFrames;
     if (t >= 1.0f) {
         t = 1.0f;
         ctx->overviewActive = false;
@@ -282,7 +283,7 @@ Mat4 updateCamera(RzContext* ctx) {
         eye = raw;
         if (ctx->internalEnterActive) {
             // frente e cima interpolados; o lookAt ortonormaliza
-            float t = ctx->internalEnterT + 1.0f / kInternalEnterFrames;
+            float t = ctx->internalEnterT + ctx->frameStep / kInternalEnterFrames;
             if (t >= 1.0f) { t = 1.0f; ctx->internalEnterActive = false; }
             ctx->internalEnterT = t;
             const float e = smooth01(t);
@@ -296,6 +297,7 @@ Mat4 updateCamera(RzContext* ctx) {
         h = lh > 1e-4f ? Vec3{ h.x / lh, 0.0f, h.z / lh } : Vec3{ 0.0f, 0.0f, -1.0f };
         ctx->followEye = restEye(ctx, raw, h);
         ctx->followLook = raw;
+        ctx->followLastRaw = raw;
         ctx->followInitialized = true;
         ctx->followAppliedDistance = ctx->followDistance;
         ctx->aimValid = false;
@@ -348,19 +350,30 @@ Mat4 updateCamera(RzContext* ctx) {
             const bool frozen = mode == RZ_CAMERA_FOLLOW_FREEZE && ctx->followInitialized;
             if (!ctx->followInitialized) {
                 ctx->followLook = raw;
-            } else {
-                Vec3& look = ctx->followLook;
-                look.x += (raw.x - look.x) * kFollowLookXZ;
-                look.z += (raw.z - look.z) * kFollowLookXZ;
-                look.y += (raw.y - look.y) * kFollowLookY;
+                ctx->followLastRaw = raw;
             }
-            if (!frozen) updateFollowCamera(ctx, ctx->followLook);   // congelada: o olho fica onde está
+            // Em passos de até um frame de 60 Hz, com o alvo andando da
+            // posição do frame anterior até a de agora: com a taxa de quadros
+            // baixa, a corda e o olhar ficam como a 60 Hz (num passo só, um
+            // alvo rápido abriria distância antes de a corda puxar)
+            const int32_t steps = ctx->frameStep > 1.0f ? int32_t(ceilf(ctx->frameStep)) : 1;
+            const float frames = ctx->frameStep / float(steps);
+            const float kXZ = stepFraction(kFollowLookXZ, frames), kY = stepFraction(kFollowLookY, frames);
+            for (int32_t s = 1; s <= steps; ++s) {
+                const Vec3 r = lerp3(ctx->followLastRaw, raw, float(s) / float(steps));
+                Vec3& look = ctx->followLook;
+                look.x += (r.x - look.x) * kXZ;
+                look.z += (r.z - look.z) * kXZ;
+                look.y += (r.y - look.y) * kY;
+                if (!frozen) updateFollowCamera(ctx, look, frames);   // congelada: o olho fica onde está
+            }
         }
         if (!ctx->overviewActive && ctx->overviewBlend > 0.0f) {
             // transição interrompida por outro alvo: a neblina termina sozinha
-            ctx->overviewBlend -= 1.0f / kOverviewFrames;
+            ctx->overviewBlend -= ctx->frameStep / kOverviewFrames;
             if (ctx->overviewBlend < 0.0f) ctx->overviewBlend = 0.0f;
         }
+        ctx->followLastRaw = raw;
         eye = ctx->followEye;
         if (ctx->overviewActive || ctx->retargetActive || mode == RZ_CAMERA_FOLLOW_FREEZE) {
             at = ctx->followLook;

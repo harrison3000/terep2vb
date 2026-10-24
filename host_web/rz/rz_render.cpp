@@ -223,7 +223,7 @@ void destroyRenderer(RzContext* ctx) {
 }
 
 void renderFrame(RzContext* ctx) {
-    ++ctx->frameCount;
+    ctx->frameTime += ctx->frameStep;
     const Mat4 viewProj = updateCamera(ctx);
 
     prepareObjects(ctx);

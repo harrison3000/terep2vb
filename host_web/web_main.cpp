@@ -40,6 +40,7 @@ bool running = false;
 bool opengl = false;            // this game is drawn by the OpenGL renderer
 int canvas_w = 1, canvas_h = 1; // the OpenGL renderer's canvas, in pixels (web_canvas_size)
 double tick_ms = 0, frame_ms = 0;  // time not yet spent on ticks / frames (a little below 0: early)
+double since_frame_ms = 0;      // since the last frame drawn: how far the OpenGL renderer's camera goes
 
 // The page's animation frames come about every 1/60 s, but not exactly: a
 // tick or a frame is done that much early (and the next one that much later)
@@ -181,6 +182,7 @@ EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bo
         return false;
     }
     tick_ms = frame_ms = 0;
+    since_frame_ms = FRAME_MS;
     running = true;
     return true;
 }
@@ -239,14 +241,17 @@ EXPORT("web_advance") bool web_advance(double ms)
         OPL3_GenerateStream(&chip, audio.data(), (uint32_t)n);
     }
     frame_ms += ms;
+    since_frame_ms += ms;
     if (frame_ms < FRAME_MS - FRAME_EARLY_MS)
         return false;
     frame_ms -= FRAME_MS;
     if (frame_ms > FRAME_MS)
         frame_ms = 0;                   // more than a frame behind: not to be made up
+    const float frames = (float)(since_frame_ms / FRAME_MS);     // slower than 60 Hz: more than 1
+    since_frame_ms = 0;
     if (opengl) {
         texts.clear();
-        gl_frame();
+        gl_frame(frames);
         return true;
     }
     game_frame();                       // its Esc never comes: the page keeps it

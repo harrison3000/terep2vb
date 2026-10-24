@@ -2,6 +2,7 @@
 // interface pública.
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
@@ -60,8 +61,8 @@ constexpr float kInternalNear        = 0.02f;   // câmera interna: near plane (
 constexpr float kInternalEnterFrames = 30.0f;   // perseguição -> interna: voo suave (frames)
 
 // Troca de alvo da câmera (rzSetCameraTarget com outro objeto): em vez de
-// teleportar, a câmera vai até o novo alvo. A câmera avança por frame, então a
-// velocidade é por frame, contando 60 fps.
+// teleportar, a câmera vai até o novo alvo. As velocidades e durações são
+// em frames de 60 Hz; a câmera avança pelo tempo de cada frame (frameStep).
 //   - alvo a até kRetargetTurnDistance tiles: só vira (o ponto olhado desliza
 //     até o novo alvo em kRetargetTurnFrames) e a corda traz a câmera;
 //   - mais longe: voo em arco até atrás do novo alvo, subindo até
@@ -131,7 +132,7 @@ constexpr int32_t  kTransparentIndex = 255;
 // Sprites (rz_sprites.cpp): fumaça/detritos/água, quads virados para a câmera
 constexpr int32_t kMaxSprites          = 256;    // máximo validado no legado
 constexpr int32_t kSpriteFrames        = 8;      // variações do ruído (textura array)
-constexpr int32_t kSpriteFrameTicks    = 4;      // frames de render por quadro
+constexpr int32_t kSpriteFrameTicks    = 4;      // frames de 60 Hz por quadro
 constexpr int32_t kSpriteNoiseSize     = 64;     // lado da textura de ruído
 constexpr int32_t kSpriteClicks        = 2;      // "cliques do spray" por quadro
 constexpr int32_t kSpriteDotsPerClick  = 260;    // pontinhos por clique
@@ -486,7 +487,9 @@ struct RzContext {
     std::vector<rz::SpriteInstance> spriteStaging;
     uint32_t   spritePalette[256] = {};              // 0x00RRGGBB com luz (atlas ou cinza)
     rz::GLuint spriteVao = 0, spriteVbo = 0, spriteNoiseTex = 0;
-    uint32_t   frameCount = 0;                       // rzRender chamados (quadro do ruído)
+    float      frameStep = 1.0f;                     // este frame: o tempo desde o anterior, em frames de 60 Hz (rzRender)
+    float      frameTime = 0.0f;                     // a soma deles: o tempo em frames de 60 Hz (ruído e fumaça)
+    rz::Vec3   followLastRaw = { 0.0f, 0.0f, 0.0f }; // o vértice-alvo no frame anterior (passos da perseguição)
 
     // Borda do mundo (rz_border.cpp), refeita com a malha do terreno
     std::vector<float> extHeights;      // (255 + 2 x 128 + 2)^2, unidade do byte
@@ -594,7 +597,7 @@ struct RzContext {
     bool     retargetActive  = false;
     bool     retargetArc     = false;    // voo em arco; senão só vira e a corda age
     float    retargetT       = 0.0f;     // progresso 0..1
-    float    retargetStep    = 0.0f;     // progresso por frame
+    float    retargetStep    = 0.0f;     // progresso por frame de 60 Hz
     float    retargetLift    = 0.0f;     // altura extra no meio do arco (mundo)
     rz::Vec3 retargetEye0  = { 0.0f, 0.0f, 0.0f };
     rz::Vec3 retargetLook0 = { 0.0f, 0.0f, 0.0f };
@@ -702,6 +705,12 @@ void drawSprites(RzContext* ctx, const Mat4& viewProj);
 
 // Erros (rzGetError): guarda o primeiro erro de uma função exportada. Usado
 // em todo return de erro delas: return recordError(ctx, "rzX", RZ_ERR_...);
+// Um filtro que anda a fração k do caminho por frame de 60 Hz, num passo
+// de `frames` deles
+inline float stepFraction(float k, float frames) {
+    return 1.0f - powf(1.0f - k, frames);
+}
+
 inline int32_t recordError(RzContext* ctx, const char* function, int32_t err) {
     if (err != RZ_OK && ctx) {
         if (ctx->errorCount == 0) {

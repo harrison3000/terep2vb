@@ -292,8 +292,9 @@ int32_t rzSetSize(RzContext* ctx, int32_t width, int32_t height) {
     return RZ_OK;
 }
 
-int32_t rzRender(RzContext* ctx) {
+int32_t rzRender(RzContext* ctx, float frames) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
+    ctx->frameStep = frames > 0.0f ? (frames < 15.0f ? frames : 15.0f) : 0.0f;   // NaN também: 0
     renderFrame(ctx);           // sem glGetError: no WebGL ele espera a GPU (só na carga)
     return RZ_OK;
 }

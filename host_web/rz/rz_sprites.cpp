@@ -198,7 +198,7 @@ void drawSprites(RzContext* ctx, const Mat4& viewProj) {
               [](const SpriteKey& a, const SpriteKey& b) { return a.depth > b.depth; });
 
     // Um registro por sprite, na ordem do desenho
-    const uint32_t tick = ctx->frameCount / uint32_t(kSpriteFrameTicks);
+    const uint32_t tick = uint32_t(ctx->frameTime) / uint32_t(kSpriteFrameTicks);
     SpriteInstance* v = ctx->spriteStaging.data();
     for (const SpriteKey& k : ctx->spriteOrder) {
         const Sprite& s = ctx->sprites[size_t(k.index)];
@@ -218,7 +218,7 @@ void drawSprites(RzContext* ctx, const Mat4& viewProj) {
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D_ARRAY, ctx->spriteNoiseTex);
     glUniform1i(p.noise, 0);
-    glUniform1f(p.time, float(ctx->frameCount) * (kSmokeNoiseSpeed / 60.0f));
+    glUniform1f(p.time, fmodf(ctx->frameTime * (kSmokeNoiseSpeed / 60.0f), 1000.0f));
     bindFog(ctx, p.fog);
 
     glDisable(GL_CULL_FACE);

@@ -250,7 +250,8 @@ int32_t rzSetObjectWheelFaces(RzContext* ctx, int32_t id,
 /* Velocidade do carro (tiles por frame, = distância andada neste frame, na
    mesma escala dos vértices). A cada frame renderizado as rodas giram por
    distância / raio, cada uma pelo seu próprio diâmetro (dianteiras e traseiras
-   podem diferir); positivo = para a frente. Fica guardada: chame uma vez por
+   podem diferir); positivo = para a frente; speed em tiles por frame de 60 Hz
+   (rzRender multiplica pelo tempo do frame). Fica guardada: chame uma vez por
    frame (ou quando mudar). 0 para parar. Não aloca.
    RZ_ERR_INVALID_ARG sem rzSetObjectWheels antes ou com valor não finito. */
 int32_t rzSetObjectWheelSpin(RzContext* ctx, int32_t id, float speed);
@@ -365,12 +366,17 @@ int32_t rzSetCameraFov(RzContext* ctx, float degrees);
              que isso, a câmera é puxada; mais perto que a metade, ela recua;
    height    altura desejada acima do alvo, em tiles (padrão 1);
    stiffness fração do caminho até a posição desejada percorrida a cada
-             rzRender, em (0, 1] (padrão 0.08): menor = mais suave e atrasada. */
+             frame de 60 Hz, em (0, 1] (padrão 0.08): menor = mais suave e
+             atrasada. */
 int32_t rzSetCameraFollow(RzContext* ctx, float distance, float height,
                           float stiffness);
 
-/* Avança a câmera e renderiza o frame no canvas. Não aloca. */
-int32_t rzRender(RzContext* ctx);
+/* Avança a câmera e renderiza o frame no canvas. Não aloca. frames: o tempo
+   desde o rzRender anterior, em frames de 60 Hz (1 a 60 fps, 2 a 30...): a
+   câmera, as rodas e os sprites andam por tempo, não por chamada, e ficam
+   iguais com a taxa de quadros que for. Limitado a 15 (um travamento não vira
+   um salto maior). */
+int32_t rzRender(RzContext* ctx, float frames);
 
 /* Checagem de erros em bloco: todas as funções que devolvem código guardam o
    primeiro erro no contexto. Dá para inicializar tudo sem olhar os retornos e
