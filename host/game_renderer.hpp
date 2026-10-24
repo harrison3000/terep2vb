@@ -24,10 +24,6 @@ extern const GameRenderer game_renderers[];
 extern const int game_renderer_count;
 int game_renderer_find(const char *name);   // index, -1 if unknown
 
-// The OpenGL renderer's draw distance (opengl_set_draw_distance): the fog's
-// start, in map tiles.
-constexpr int DRAW_DISTANCE_MIN = 1, DRAW_DISTANCE_DEFAULT = 30, DRAW_DISTANCE_MAX = 110;
-
 // renderer_sw.cpp, renderer_gl.cpp
 bool software_start();
 bool software_frame(int win_w, int win_h, PictureRect *where);

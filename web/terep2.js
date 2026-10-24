@@ -54,9 +54,6 @@ function wasiImports(getMemory) {
             view.setUint8(p, 2);    // character device
             return 0;
         },
-        fd_prestat_get: () => 8,    // EBADF: no directories
-        fd_prestat_dir_name: () => 8,
-        proc_exit(code) { throw new Error('terep2.wasm exited: ' + code); },
     };
 }
 
@@ -247,7 +244,7 @@ function sizeCanvases() {
             c.width = w;
             c.height = h;
         }
-    wasm.web_view(w, h);
+    wasm.web_canvas_height(h);
 }
 
 // The OpenGL renderer's text (game_frame's), over its picture.
@@ -270,19 +267,19 @@ function frame(now) {
         return;
     if (webgl)
         sizeCanvases();
-    const p = wasm.web_advance(now - last);
+    const drawn = wasm.web_advance(now - last);
     last = now;
     playSamples();
-    if (p && webgl) {
+    if (drawn && webgl) {
         drawTexts();
         drawMinimap();
-    } else if (p) {
+    } else if (drawn) {
         const w = wasm.web_width(), h = wasm.web_height();
         if (picture.width !== w || picture.height !== h) {
             picture.width = w;
             picture.height = h;
         }
-        const pixels = new Uint8ClampedArray(wasm.memory.buffer, p, w * h * 4);
+        const pixels = new Uint8ClampedArray(wasm.memory.buffer, wasm.web_picture(), w * h * 4);
         picture.getContext('2d').putImageData(new ImageData(pixels, w, h), 0, 0);
         // as large as the window allows, keeping the shape, pixels left sharp
         const screen = $('screen'), k = Math.min(innerWidth / w, innerHeight / h);

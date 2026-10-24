@@ -4,7 +4,10 @@
 #pragma once
 #include <string>
 #include <SDL.h>
-#include "game_renderer.hpp"           // DRAW_DISTANCE_*
+
+// The OpenGL renderer's draw distance (opengl_set_draw_distance): the fog's
+// start, in map tiles.
+constexpr int DRAW_DISTANCE_MIN = 1, DRAW_DISTANCE_DEFAULT = 30, DRAW_DISTANCE_MAX = 110;
 
 // What the SDL host does around the game (not options of the game itself).
 struct HostOptions {

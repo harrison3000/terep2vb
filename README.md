@@ -108,10 +108,11 @@ page needs to be served, not opened as a file:
 
 and then http://localhost:8000. The sound is the same AdLib emulation (Nuked-OPL3, in the module
 too, played through an AudioWorklet), and there is the same minimap, in the bottom right corner
-of the window. Both renderers: the software one, and the OpenGL one (`host/renderer_gl.cpp` with
-the renderizeitor library, in the same module) drawn with WebGL 2, whose OpenGL calls are done by
-`web/webgl.js` (texture buffers, BGRA and the GLSL 3.30 shaders adapted there, so the library is
-unchanged); no map preview; Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
+of the window. Both renderers: the software one, and the OpenGL one, drawn with WebGL 2:
+`web/gl_renderer.cpp` (the SDL host's `host/renderer_gl.cpp` made for the page) and `web/rz`, the
+web's own copy of the renderizeitor (GLSL ES 3.00 shaders, PCX files from memory, the page's
+canvas), whose WebGL calls are imports of the module done one for one by `web/webgl.js`; the
+submodule is not used. No map preview; Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
 the replays give the same frames as the Win16 port there too.
 
 ### Higher resolution
@@ -187,7 +188,7 @@ host/
   imgui/        Dear ImGui (git submodule)
   Nuked-OPL3/   OPL3 emulator (git submodule, LGPL 2.1)
 web/            the game in a web page: web_main.cpp (its host, WebAssembly), index.html, terep2.js,
-                webgl.js and rz_platform_web.cpp (the OpenGL renderer with WebGL 2)
+                gl_renderer.cpp, rz/ and webgl.js (the OpenGL renderer with WebGL 2)
 host_test/      the test host (terep2-headless)
   main.cpp      replays a recording of the Win16 port and compares the frames
 data/           the maps (not in the repository)

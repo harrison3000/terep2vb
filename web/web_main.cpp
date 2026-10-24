@@ -4,25 +4,23 @@
  * the map's files from a folder the player picks (nothing is uploaded),
  * copies them into this module's memory (web_alloc, web_add_file) and
  * starts the game; then, every animation frame, it passes the keys
- * (web_key) and the time (web_advance) and draws the picture it gets back.
+ * (web_key) and the time (web_advance) and, when there is a new frame, draws
+ * the picture (web_picture).
  * The original timing, as in the SDL host: physics at 120 Hz, the picture
  * at 60 Hz.  Sound: the game's AdLib writes go to the Nuked-OPL3 emulator,
  * whose samples, made as the time advances, the page plays (web_audio_*).
  * The minimap: the map's picture (web_minimap) and where the cars are
- * (web_car_*).  The OpenGL renderer (host/renderer_gl.cpp, with the
- * renderizeitor library) draws with WebGL 2 on the page's canvas: the
- * library's OpenGL calls are imports done by web/webgl.js
- * (rz_platform_web.cpp), and the text is drawn by the page (web_text_*).
- * See web/terep2.js.
+ * (web_car_*).  Or the OpenGL renderer (gl_renderer.cpp and web/rz) draws
+ * the frame itself with WebGL 2 on the page's canvas (web/webgl.js), and the
+ * page draws its text (web_text_*).  See web/terep2.js.
  */
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <strings.h>
 #include <vector>
-#include "../host/game_renderer.hpp"
 #include "../host/host.hpp"
-#include "../host/renderer_api.hpp"
+#include "web.hpp"
 extern "C" {
 #include "opl3.h"
 }
@@ -40,7 +38,7 @@ std::vector<File> files;        // the map's, by their names (any case)
 
 bool running = false;
 bool opengl = false;            // this game is drawn by the OpenGL renderer
-int view_w = 1, view_h = 1;     // the canvas's size (OpenGL renderer), web_view
+int canvas_height = 1;          // the OpenGL renderer's canvas, in pixels (web_canvas_height)
 double tick_ms = 0, frame_ms = 0;  // time not yet spent on ticks / frames (a little below 0: early)
 
 // The page's animation frames come about every 1/60 s, but not exactly: a
@@ -81,7 +79,7 @@ void stop_game()
 {
     if (running) {
         if (opengl)
-            opengl_stop();
+            gl_stop();
         host_free_game();
     }
     running = false;
@@ -97,33 +95,11 @@ FILE *data_fopen(const char *name)
     return f ? fmemopen(f->data, f->size, "rb") : nullptr;
 }
 
-// The renderizeitor reads its PCX files with fopen: linked with
-// --wrap=fopen, they come from memory too (there is no other file here).
-extern "C" FILE *__wrap_fopen(const char *name, const char *)
+const uint8_t *web_file(const char *name, int32_t *size)
 {
-    return data_fopen(name);
-}
-
-// The map's files for the OpenGL renderer: their names, which are all
-// data_fopen needs ("" for a file that is not there).
-MapFiles map_files(const std::string &)
-{
-    MapFiles m;
-    auto find = [](const char *name) { const File *f = find_file(name); return f ? f->name : std::string(); };
-    m.map = find(fname_map);
-    m.col = find(fname_col);
-    m.maptex = find(fname_maptex);
-    m.textures = find(fname_textures);
-    m.fog = find(fname_fog);
-    m.smoke = find(fname_smoke);
-    for (int i = 0; i < world.num_cars; i++) {
-        MapFiles::Car c;
-        c.dat = find(car_dat_name(i));
-        if (!car_get(i).skin.empty())
-            c.pcx = find(car_pcx_name(i));
-        m.cars.push_back(c);
-    }
-    return m;
+    const File *f = find_file(name);
+    *size = f ? (int32_t)f->size : 0;
+    return f ? f->data : nullptr;
 }
 
 void web_text(float x, float y, float size, const uint8_t *rgb, const char *text)
@@ -184,7 +160,7 @@ EXPORT("web_audio_frames") int web_audio_frames() { return (int)(audio.size() / 
 
 // A game on the files added, at a render scale (1..MAX_RENDER_SCALE) and with
 // the extra options (fix_ice_bug, hide_banner), drawn by the game itself or,
-// with gl, by the OpenGL renderer (web_view first).  Returns false if the
+// with gl, by the OpenGL renderer (web_canvas_height first).  Returns false if the
 // map cannot be played (no car1.dat...) or the renderer cannot start.
 EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bool gl)
 {
@@ -199,7 +175,7 @@ EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bo
         return false;
     opengl = gl;
     texts.clear();
-    if (opengl && !opengl_start()) {
+    if (opengl && !gl_start()) {
         host_free_game();
         return false;
     }
@@ -213,18 +189,17 @@ EXPORT("web_stop") void web_stop()
     stop_game();
 }
 
-// The canvas's size in pixels, for the OpenGL renderer's text (the library
-// asks webgl.js for it itself).
-EXPORT("web_view") void web_view(int w, int h)
+// The canvas's height in pixels, for the OpenGL renderer's text (the
+// library asks webgl.js for the size itself).
+EXPORT("web_canvas_height") void web_canvas_height(int h)
 {
-    view_w = w < 1 ? 1 : w;
-    view_h = h < 1 ? 1 : h;
+    canvas_height = h < 1 ? 1 : h;
 }
 
 // The OpenGL renderer's draw distance (DRAW_DISTANCE_MIN..MAX tiles): any time.
 EXPORT("web_draw_distance") void web_draw_distance(int tiles)
 {
-    opengl_set_draw_distance(tiles < DRAW_DISTANCE_MIN ? DRAW_DISTANCE_MIN
+    gl_set_draw_distance(tiles < DRAW_DISTANCE_MIN ? DRAW_DISTANCE_MIN
                              : tiles > DRAW_DISTANCE_MAX ? DRAW_DISTANCE_MAX : tiles);
 }
 
@@ -235,14 +210,13 @@ EXPORT("web_key") void web_key(int scancode)
         game_key((uint8_t)scancode);
 }
 
-// ms more of time: the physics ticks and the frames it holds.  Returns the
-// new picture (web_width() x web_height() RGBA pixels), or null when no new
-// frame is due.  With the OpenGL renderer the frame is already on the
-// canvas: not null then, with its texts in web_text_*.
-EXPORT("web_advance") const uint32_t *web_advance(double ms)
+// ms more of time: the physics ticks and the frames it holds.  Returns true
+// when it made a new frame: the picture in web_picture, or with the OpenGL
+// renderer already on the canvas, with its texts in web_text_*.
+EXPORT("web_advance") bool web_advance(double ms)
 {
     if (!running)
-        return nullptr;
+        return false;
     if (ms < 0)
         ms = 0;                         // the first animation frame can come stamped before the start
     if (ms > 250)
@@ -250,7 +224,7 @@ EXPORT("web_advance") const uint32_t *web_advance(double ms)
     for (tick_ms += ms; tick_ms >= TICK_MS - TICK_EARLY_MS; tick_ms -= TICK_MS) {
         physics_tick();
         if (opengl)
-            opengl_tick();
+            gl_tick();
     }
     audio.clear();
     if (audio_rate) {                   // the sound of that time (the writes of the last frame)
@@ -262,16 +236,14 @@ EXPORT("web_advance") const uint32_t *web_advance(double ms)
     }
     frame_ms += ms;
     if (frame_ms < FRAME_MS - FRAME_EARLY_MS)
-        return nullptr;
+        return false;
     frame_ms -= FRAME_MS;
     if (frame_ms > FRAME_MS)
         frame_ms = 0;                   // more than a frame behind: not to be made up
     if (opengl) {
         texts.clear();
-        PictureRect where;
-        opengl_frame(view_w, view_h, &where);
-        static const uint32_t drawn = 0;
-        return &drawn;
+        gl_frame(canvas_height);
+        return true;
     }
     game_frame();                       // its Esc never comes: the page keeps it
     const int n = screen_w() * screen_h();
@@ -281,8 +253,11 @@ EXPORT("web_advance") const uint32_t *web_advance(double ms)
         const uint8_t *c = host_palette(scr[i]);
         picture[i] = 0xff000000u | (uint32_t)c[2] << 16 | (uint32_t)c[1] << 8 | c[0];
     }
-    return picture.data();
+    return true;
 }
+
+// The software renderer's last frame: web_width() x web_height() RGBA pixels.
+EXPORT("web_picture") const uint32_t *web_picture() { return picture.data(); }
 
 // The OpenGL renderer's texts of the last frame (see Text).
 EXPORT("web_text_count") int web_text_count() { return (int)texts.size(); }
