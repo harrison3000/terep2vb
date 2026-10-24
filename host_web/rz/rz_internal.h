@@ -302,6 +302,8 @@ struct Object {
     bool      alive   = false;
     bool      positioned = false;   // já recebeu rzUpdateObjectVertices
     bool      gpuDirty   = false;   // cantos/VBO desatualizados (polígonos, linhas): reenviar no próximo frame
+    bool      buffersDirty = false; // polígonos/linhas novos: realocar o VBO e reenviar os índices (no
+                                    // frame, uma vez, e não a cada polígono da carga)
     bool      positionsDirty = false;   // posições novas (rzUpdateObjectVertices): reenviar ao bloco
     Vec3      center = { 0.0f, 0.0f, 0.0f };   // esfera envolvente (refeita em cada update)
     float     radius = 0.0f;
@@ -327,6 +329,7 @@ struct Object {
     std::vector<GlassVertex> glassStaging; // triângulos do leque, preenchido no envio
     GLuint    glassVao = 0, glassVbo = 0;
     bool      glassDirty = false;
+    bool      glassResized = false;   // polígonos novos: realocar o VBO do vidro no próximo envio
 
     // Rodas (rz_wheels.cpp): staging vazio = sem rodas
     uint16_t  wheelVertex[4] = {};

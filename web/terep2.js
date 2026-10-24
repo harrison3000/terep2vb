@@ -4,6 +4,7 @@
 import { webglImports } from './webgl.js';
 
 const $ = (id) => document.getElementById(id);
+const touchScreen = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 
 // KeyboardEvent.code -> PC scancode (set 1), as the SDL host's table.
 const SCANCODES = {
@@ -62,9 +63,15 @@ function wasiImports(getMemory) {
 let audio = null, player = null;    // AudioContext, its AudioWorkletNode
 
 // Within the click that starts a game (browsers allow sound only then).
+// AudioWorklet needs a secure page (https, or localhost): served over plain
+// http from another machine (a phone on the local network) there is no sound.
 function startAudio() {
     if (!audio) {
         audio = new AudioContext();
+        if (!audio.audioWorklet) {
+            console.warn('no sound: AudioWorklet needs https (or localhost)');
+            return;
+        }
         audio.audioWorklet.addModule('opl_player.js').then(() => {
             player = new AudioWorkletNode(audio, 'opl-player', { outputChannelCount: [2] });
             player.connect(audio.destination);
@@ -154,10 +161,16 @@ async function load() {
     wasm = instance.exports;
 }
 
-// The folders of the picked one that hold a map (map.pcx, col.pcx, car1.dat).
+// The folders of the picked one that hold a map (map.pcx, col.pcx, car1.dat),
+// with their files: only the kinds of file the game reads (PCX images, .dat
+// tables and cars, sim.cfg); anything else in the folders is never read.
+const MAP_FILE = /\.(pcx|dat|cfg)$/i;
+
 function findMaps(fileList) {
     const dirs = new Map();
     for (const f of fileList) {
+        if (!MAP_FILE.test(f.name))
+            continue;
         const path = f.webkitRelativePath || f.name;
         const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '.';
         if (!dirs.has(dir))
@@ -185,14 +198,35 @@ function showMaps() {
     $('none').hidden = maps.size > 0 || !$('folder').files.length;
 }
 
-// Copies the map's files into the module and starts the game.
+// Copies the map's files into the module and starts the game.  One at a
+// time: while a map loads, more clicks on the list do nothing.
+let loading = false;
+
 async function play(dir) {
+    if (loading || playing)
+        return;
+    loading = true;
+    $('maps').classList.add('loading');
+    try {
+        await loadGame(dir);
+    } catch (e) {
+        console.error(e);
+        alert('Could not start the game: ' + e);
+    } finally {
+        loading = false;
+        $('maps').classList.remove('loading');
+    }
+}
+
+async function loadGame(dir) {
     if ($('sound').checked)
         startAudio();
     wasm.web_clear_files();
     const enc = new TextEncoder();
-    for (const f of maps.get(dir)) {
-        const data = new Uint8Array(await f.arrayBuffer());
+    const files = maps.get(dir);
+    const contents = await Promise.all(files.map((f) => f.arrayBuffer()));    // all at once
+    for (const [k, f] of files.entries()) {
+        const data = new Uint8Array(contents[k]);
         const name = enc.encode(f.name + '\0');
         const pname = wasm.web_alloc(name.length), pdata = wasm.web_alloc(data.length);
         new Uint8Array(wasm.memory.buffer, pname, name.length).set(name);
@@ -221,6 +255,7 @@ async function play(dir) {
     camera = 3;                         // a new game starts on the chase camera
     playing = true;
     last = performance.now();
+    textsShown = '';
     requestAnimationFrame(frame);
 }
 
@@ -245,6 +280,7 @@ function sizeCanvases() {
         if (c.width !== w || c.height !== h) {
             c.width = w;
             c.height = h;
+            textsShown = '';            // the overlay was cleared
         }
     wasm.web_canvas_size(w, h);
 }
@@ -252,16 +288,28 @@ function sizeCanvases() {
 addEventListener('resize', () => { if (playing && webgl) sizeCanvases(); });
 
 // The OpenGL renderer's text (game_frame's), over its picture.
+// Redrawn only when it changes (the banner's colour does, every few frames):
+// clearing a canvas the size of the screen every frame costs on a phone.
+const textDecoder = new TextDecoder();
+let textsShown = '';
+
 function drawTexts() {
+    const texts = [];
+    for (let i = 0; i < wasm.web_text_count(); i++) {
+        const p = wasm.web_text_str(i), bytes = new Uint8Array(wasm.memory.buffer, p);
+        texts.push([wasm.web_text_x(i), wasm.web_text_y(i), wasm.web_text_size(i), wasm.web_text_rgb(i),
+                    textDecoder.decode(bytes.subarray(0, bytes.indexOf(0)))]);
+    }
+    const key = JSON.stringify(texts);
+    if (key === textsShown)
+        return;
+    textsShown = key;
     const overlay = $('overlay'), ctx = overlay.getContext('2d');
     ctx.clearRect(0, 0, overlay.width, overlay.height);
     ctx.textBaseline = 'top';
-    for (let i = 0; i < wasm.web_text_count(); i++) {
-        const size = wasm.web_text_size(i), x = wasm.web_text_x(i), y = wasm.web_text_y(i);
+    for (const [x, y, size, rgb, text] of texts) {
         ctx.font = `${size}px monospace`;
-        ctx.fillStyle = '#' + wasm.web_text_rgb(i).toString(16).padStart(6, '0');
-        const p = wasm.web_text_str(i), bytes = new Uint8Array(wasm.memory.buffer, p);
-        const text = new TextDecoder().decode(bytes.subarray(0, bytes.indexOf(0)));
+        ctx.fillStyle = '#' + rgb.toString(16).padStart(6, '0');
         text.split('\n').forEach((line, k) => ctx.fillText(line, x, y + k * size));
     }
 }
@@ -285,8 +333,11 @@ function frame(now) {
         picture.getContext('2d').putImageData(new ImageData(pixels, w, h), 0, 0);
         // as large as the window allows, keeping the shape, pixels left sharp
         const screen = $('screen'), k = Math.min(innerWidth / w, innerHeight / h);
-        screen.width = Math.floor(w * k);
-        screen.height = Math.floor(h * k);
+        const sw = Math.floor(w * k), sh = Math.floor(h * k);
+        if (screen.width !== sw || screen.height !== sh) {     // setting the size reallocates it
+            screen.width = sw;
+            screen.height = sh;
+        }
         const ctx = screen.getContext('2d');
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(picture, 0, 0, screen.width, screen.height);
@@ -336,7 +387,6 @@ function loadPrefs() {
 // On a touch screen: buttons for car 1 (the arrows' and keypad 5's scancodes,
 // and 1 / 2, which jump to turn a car over), one that goes through the
 // cameras F1..F5, and one that goes back to the maps (there is no Esc).
-const touchScreen = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 let camera = 3;                     // the F key of the camera last asked for, 0 = F1 (F4: chase, the default)
 
 function holdButton(b, press, release) {

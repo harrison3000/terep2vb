@@ -9,53 +9,98 @@ namespace rz {
 
 namespace {
 
-GLuint compileShader(GLenum type, const char* source) {
+// Programas: todos são pedidos de uma vez no começo de createRenderer
+// (startPrograms), e o status de cada um só é perguntado quando ele é usado
+// (linkProgram). Perguntar logo depois do link faz o WebGL esperar a
+// compilação de um por um; assim o driver compila todos juntos.
+struct PendingProgram {
+    const char* vertexSource;
+    const char* fragmentSource;
+    GLuint program, vs, fs;
+};
+constexpr int32_t kMaxPending = 8;
+PendingProgram g_pending[kMaxPending];      // um contexto por vez
+int32_t g_pendingCount = 0;
+
+GLuint startShader(GLenum type, const char* source) {
     GLuint shader = glCreateShader(type);
     glShaderSource(shader, 1, &source, nullptr);
     glCompileShader(shader);
+    return shader;
+}
+
+PendingProgram startProgram(const char* vertexSource, const char* fragmentSource) {
+    PendingProgram p = { vertexSource, fragmentSource, glCreateProgram(),
+                         startShader(GL_VERTEX_SHADER, vertexSource),
+                         startShader(GL_FRAGMENT_SHADER, fragmentSource) };
+    glAttachShader(p.program, p.vs);
+    glAttachShader(p.program, p.fs);
+    glLinkProgram(p.program);
+    return p;
+}
+
+bool shaderCompiled(GLuint shader) {
     GLint ok = 0;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
     if (!ok) {
         char log[2048];
         glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
         std::printf("shader: %s\n", log);
-        glDeleteShader(shader);
-        return 0;
     }
-    return shader;
+    return ok;
 }
 
+// O programa pronto, ou 0 (com o erro no console)
+GLuint finishProgram(const PendingProgram& p) {
+    GLint ok = 0;
+    glGetProgramiv(p.program, GL_LINK_STATUS, &ok);
+    if (!ok) {
+        if (shaderCompiled(p.vs) && shaderCompiled(p.fs)) {
+            char log[2048];
+            glGetProgramInfoLog(p.program, sizeof(log), nullptr, log);
+            std::printf("link: %s\n", log);
+        }
+        glDeleteProgram(p.program);
+    }
+    glDeleteShader(p.vs);
+    glDeleteShader(p.fs);
+    return ok ? p.program : 0;
+}
+
+template <size_t V, size_t F>
+void startProgram(const unsigned char (&vertexSource)[V], const unsigned char (&fragmentSource)[F]) {
+    g_pending[g_pendingCount++] = startProgram(reinterpret_cast<const char*>(vertexSource),
+                                               reinterpret_cast<const char*>(fragmentSource));
+}
+
+// Todos os programas do contexto, de uma vez (ver PendingProgram)
+void startPrograms() {
+    g_pendingCount = 0;
+    startProgram(kTerrainVertexShader, kTerrainFragmentShader);
+    startProgram(kObjectVertexShader, kObjectFragmentShader);
+    startProgram(kDepthVertexShader, kDepthFragmentShader);
+    startProgram(kObjectDepthVertexShader, kDepthFragmentShader);
+    startProgram(kWallVertexShader, kWallFragmentShader);
+    startProgram(kGlassVertexShader, kGlassFragmentShader);
+    startProgram(kSpriteVertexShader, kSpriteFragmentShader);
+}
 
 constexpr GLint kUnitAtlas  = 0;    // unidade de textura do atlas (e da textura do objeto)
                                     // (1: as sombras, kUnitShadow)
 
 } // namespace
 
-// Compila e liga um programa (também usado por rz_border.cpp)
+// Um programa (também usado por rz_border.cpp, rz_glass.cpp, rz_sprites.cpp):
+// o já pedido por startPrograms, ou compilado agora
 GLuint linkProgram(const char* vertexSource, const char* fragmentSource) {
-    GLuint vs = compileShader(GL_VERTEX_SHADER, vertexSource);
-    GLuint fs = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
-    if (!vs || !fs) {
-        if (vs) glDeleteShader(vs);
-        if (fs) glDeleteShader(fs);
-        return 0;
+    for (int32_t i = 0; i < g_pendingCount; ++i) {
+        const PendingProgram p = g_pending[i];
+        if (p.vertexSource == vertexSource && p.fragmentSource == fragmentSource) {
+            g_pending[i] = g_pending[--g_pendingCount];
+            return finishProgram(p);
+        }
     }
-    GLuint program = glCreateProgram();
-    glAttachShader(program, vs);
-    glAttachShader(program, fs);
-    glLinkProgram(program);
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-    GLint ok = 0;
-    glGetProgramiv(program, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char log[2048];
-        glGetProgramInfoLog(program, sizeof(log), nullptr, log);
-        std::printf("link: %s\n", log);
-        glDeleteProgram(program);
-        return 0;
-    }
-    return program;
+    return finishProgram(startProgram(vertexSource, fragmentSource));
 }
 
 void initFogUniforms(GLuint program, FogUniforms& u) {
@@ -86,6 +131,7 @@ void initLightUniforms(GLuint program) {
 }
 
 bool createRenderer(RzContext* ctx) {
+    startPrograms();
     TerrainProgram& t = ctx->terrainProgram;
     t.program = linkProgram(kTerrainVertexShader, kTerrainFragmentShader);
     if (!t.program) return false;
@@ -159,6 +205,12 @@ bool createRenderer(RzContext* ctx) {
 }
 
 void destroyRenderer(RzContext* ctx) {
+    for (int32_t i = 0; i < g_pendingCount; ++i) {   // pedidos e não usados (a criação falhou antes)
+        glDeleteProgram(g_pending[i].program);
+        glDeleteShader(g_pending[i].vs);
+        glDeleteShader(g_pending[i].fs);
+    }
+    g_pendingCount = 0;
     if (ctx->terrainProgram.program) glDeleteProgram(ctx->terrainProgram.program);
     if (ctx->objectProgram.program) glDeleteProgram(ctx->objectProgram.program);
     if (ctx->terrainVao) glDeleteVertexArrays(1, &ctx->terrainVao);

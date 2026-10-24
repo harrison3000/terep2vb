@@ -127,10 +127,16 @@ void emitLines(const RzContext* ctx, const Object& o, ObjectVertex*& v) {
     }
 }
 
-// Tamanho do staging/VBO: polígonos + linhas (fase de carga: realoca o VBO
-// e reenvia os índices dos polígonos; os cantos vão no próximo frame)
+// Tamanho do staging: polígonos + linhas (fase de carga). O VBO e os índices
+// do bloco vão no próximo frame (uploadBuffers), uma vez por objeto.
 void resizeObjectBuffers(Object& o) {
     o.staging.resize(o.triangles.size() * 3 + o.lines.size() * size_t(kLineVertices));
+    o.buffersDirty = true;
+    o.gpuDirty = true;
+}
+
+// Realoca o VBO no tamanho do staging e reenvia os índices dos polígonos ao bloco
+void uploadBuffers(Object& o) {
     glBindBuffer(GL_ARRAY_BUFFER, o.vbo);
     glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(o.staging.size() * sizeof(ObjectVertex)),
                  nullptr, GL_STATIC_DRAW);
@@ -138,7 +144,6 @@ void resizeObjectBuffers(Object& o) {
     glBindBuffer(GL_UNIFORM_BUFFER, o.dataBuffer);
     glBufferSubData(GL_UNIFORM_BUFFER, kObjectIndicesOffset, GLsizeiptr(indices.size() * sizeof(int32_t)),
                     indices.data());
-    o.gpuDirty = true;
 }
 
 // Monta os cantos dos triângulos (e das linhas) e reenvia o vertex buffer
@@ -242,7 +247,7 @@ int32_t addPolygon(RzContext* ctx, int32_t id, const uint16_t* indices, const Rz
         o.triangles.push_back({ first, first + i, first + i + 1, polygon });
     }
     resizeObjectBuffers(o);
-    return glGetError() == GL_NO_ERROR ? RZ_OK : RZ_ERR_GL;
+    return RZ_OK;
 }
 
 } // namespace
@@ -275,13 +280,18 @@ bool objectInRange(const RzContext* ctx, const Object& o) {
     return dot(d, d) <= reach * reach;
 }
 
-// Reenvia os VBOs alterados, antes dos dois passes do frame (sem alocar).
-// Os fora do alcance ficam para quando entrarem (gpuDirty continua).
+// Reenvia os VBOs alterados, antes dos dois passes do frame (sem alocar,
+// fora o primeiro envio depois da carga). Os fora do alcance ficam para
+// quando entrarem (gpuDirty continua).
 void prepareObjects(RzContext* ctx) {
     for (Object& o : ctx->objects) {
         if (o.alive && objectInRange(ctx, o)) prepareWheels(ctx, o);
         if (!drawable(o) || !objectInRange(ctx, o)) continue;
         const bool rebuild = o.gpuDirty;
+        if (o.buffersDirty) {
+            uploadBuffers(o);
+            o.buffersDirty = false;
+        }
         if (rebuild) {
             uploadObject(ctx, o);
             o.gpuDirty = false;
@@ -426,7 +436,7 @@ int32_t rzAddObjectLine(RzContext* ctx, int32_t id, uint16_t a, uint16_t b,
     if (o.lines.size() >= 65535) return recordError(ctx, "rzAddObjectLine", RZ_ERR_SIZE);
     o.lines.push_back({ a, b, int16_t(paletteIndex), 0.5f * thickness * ctx->cellSize });
     resizeObjectBuffers(o);
-    return recordError(ctx, "rzAddObjectLine", glGetError() == GL_NO_ERROR ? RZ_OK : RZ_ERR_GL);
+    return RZ_OK;
 }
 
 int32_t rzUpdateObjectVertices(RzContext* ctx, int32_t id,

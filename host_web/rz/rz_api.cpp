@@ -286,8 +286,8 @@ int32_t rzSetSize(RzContext* ctx, int32_t width, int32_t height) {
 
 int32_t rzRender(RzContext* ctx) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
-    renderFrame(ctx);
-    return recordError(ctx, "rzRender", glGetError() == GL_NO_ERROR ? RZ_OK : RZ_ERR_GL);
+    renderFrame(ctx);           // sem glGetError: no WebGL ele espera a GPU (só na carga)
+    return RZ_OK;
 }
 
 } // extern "C"

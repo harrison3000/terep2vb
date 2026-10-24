@@ -323,7 +323,7 @@ bool updateTerrain(RzContext* ctx) {
         // que copiam deste quad (ver spec 12 e o branch super_complicated_border_update)
         if (edgeTile) rebuildSkirtMesh(ctx);
     }
-    return glGetError() == GL_NO_ERROR;
+    return true;                // sem glGetError: chamado no jogo, e no WebGL ele espera a GPU
 }
 
 // Esfera envolvente: raio = meia diagonal da caixa do terreno. Usada pela

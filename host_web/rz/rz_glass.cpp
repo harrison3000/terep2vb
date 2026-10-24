@@ -55,8 +55,14 @@ void uploadGlass(Object& o) {
         }
     }
     glBindBuffer(GL_ARRAY_BUFFER, o.glassVbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, GLsizeiptr(o.glassStaging.size() * sizeof(GlassVertex)),
-                    o.glassStaging.data());
+    if (o.glassResized) {                     // o primeiro envio depois de polígonos novos
+        glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(o.glassStaging.size() * sizeof(GlassVertex)),
+                     o.glassStaging.data(), GL_DYNAMIC_DRAW);
+        o.glassResized = false;
+    } else {
+        glBufferSubData(GL_ARRAY_BUFFER, 0, GLsizeiptr(o.glassStaging.size() * sizeof(GlassVertex)),
+                        o.glassStaging.data());
+    }
 }
 
 } // namespace
@@ -162,11 +168,9 @@ int32_t rzAddObjectTranslucentPolygon(RzContext* ctx, int32_t id,
     o.glassIndices.insert(o.glassIndices.end(), indices, indices + n);
     o.glassStaging.resize(o.glassStaging.size() + size_t(n - 2) * 3);
 
-    glBindBuffer(GL_ARRAY_BUFFER, o.glassVbo);
-    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(o.glassStaging.size() * sizeof(GlassVertex)),
-                 nullptr, GL_DYNAMIC_DRAW);
+    o.glassResized = true;                    // o VBO no próximo envio (uploadGlass), uma vez
     o.glassDirty = true;
-    return recordError(ctx, "rzAddObjectTranslucentPolygon", glGetError() == GL_NO_ERROR ? RZ_OK : RZ_ERR_GL);
+    return RZ_OK;
 }
 
 } // extern "C"

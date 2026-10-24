@@ -144,13 +144,14 @@ bool gl_start(int width, int height)
     canvas_height = height;
     if (rzCreate(width, height, &ctx) != RZ_OK)
         return false;
-    // the map's layers: height and tile, 256 x 256, change while playing
+    // the map's layers: height and tile, 256 x 256, change while playing;
+    // the tiles before the heights, so the terrain's mesh is built once
     rzSetTerrainScale(ctx, 1.0f, 16.0f/255.5f);
-    rzSetHeightmap(ctx, heightmap(), 256,256);
     int32_t size;
     const uint8_t *maptex = web_file(fname_maptex, &size);
     rzLoadTileAtlas(ctx, maptex, size);
     rzSetTileMap(ctx, colormap(), 256,256);
+    rzSetHeightmap(ctx, heightmap(), 256,256);
 
     const uint8_t *textures = web_file(fname_textures, &size);
     if (textures)
