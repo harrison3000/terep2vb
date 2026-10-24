@@ -27,7 +27,7 @@ GLuint compileShader(GLenum type, const char* source) {
 
 
 constexpr GLint kUnitAtlas  = 0;    // unidade de textura do atlas (e da textura do objeto)
-                                    // (1..3: shadow maps, kUnitShadowFirst)
+                                    // (1: as sombras, kUnitShadow)
 
 } // namespace
 

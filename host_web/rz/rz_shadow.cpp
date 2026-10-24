@@ -3,9 +3,11 @@
 // terreno; cada cascata é uma caixa nessa view.
 //
 // Seguindo um alvo (com neblina), por distância 3D ao olho:
-//   0  0 .. kCascadeSplit0 (6 tiles)    512   terreno + objetos, todo frame
-//   1  .. kCascadeSplit1 (20 tiles)     1024  terreno + objetos, todo frame
-//   2  .. fim da neblina                2048  só terreno
+//   0  0 .. kCascadeSplit0              terreno + objetos, todo frame
+//   1  .. kCascadeSplit1                terreno + objetos, todo frame
+//   2  .. fim da neblina                só terreno
+// As três são as camadas de uma textura array de profundidade
+// (sampler2DArrayShadow), kShadowMapSize de lado, cada camada no seu FBO.
 // As caixas 0 e 1 envolvem a esfera da fatia do frustum da câmera (raio só
 // depende do FOV e dos limites: não muda quando a câmera gira) e andam em
 // passos de um texel, para a sombra não tremer. Delas, só as linhas do
@@ -23,7 +25,7 @@
 // da caixa de uma cascata, ela não sombreia.
 // Na visão geral (sem alvo, sem neblina): só a cascata 2, cobrindo o terreno
 // inteiro, com terreno e objetos, refeita todo frame.
-// Os tamanhos são limitados a GL_MAX_TEXTURE_SIZE (o GL 3.3 só garante 1024).
+// O tamanho é limitado a GL_MAX_TEXTURE_SIZE (o WebGL 2 garante 2048).
 // Em profundidade, todas cobrem a esfera do terreno inteiro com folga.
 
 #include <cmath>
@@ -33,9 +35,6 @@
 namespace rz {
 
 namespace {
-
-constexpr int32_t kShadowRequested[kShadowMaps] = {
-    kCascadeNearSize, kCascadeMidSize, kCascadeFarSize };
 
 // Caixa de um mapa no plano da luz: centro (cx, cy) na view da luz e meia-largura
 struct ShadowBox {
@@ -84,7 +83,7 @@ ShadowBox snappedBox(const Mat4& view, Vec3 p, float half, int32_t size) {
 
 void beginPass(const RzContext* ctx, int32_t map, const Mat4& matrix) {
     glBindFramebuffer(GL_FRAMEBUFFER, ctx->shadowFbo[map]);
-    glViewport(0, 0, ctx->shadowSize[map], ctx->shadowSize[map]);
+    glViewport(0, 0, ctx->shadowSize, ctx->shadowSize);
     glClear(GL_DEPTH_BUFFER_BIT);
     setMatrix(ctx->depthProgram.lightViewProj, matrix);
 }
@@ -165,29 +164,27 @@ void drawTerrainDepth(const RzContext* ctx, const Mat4& view, ShadowBox b) {
 
 } // namespace
 
-// Texturas de profundidade com comparação (sampler2DShadow, PCF 2x2 com
-// GL_LINEAR), cada uma num FBO sem cor.
+// A textura array de profundidade com comparação (sampler2DArrayShadow, PCF
+// 2x2 com GL_LINEAR), cada camada num FBO sem cor.
 bool createShadowMaps(RzContext* ctx) {
     GLint driverMax = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &driverMax);
+    const int32_t size = driverMax > 0 && kShadowMapSize > driverMax ? driverMax : kShadowMapSize;
+    ctx->shadowSize = size;
+    glGenTextures(1, &ctx->shadowTex);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, ctx->shadowTex);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, size, size, kShadowMaps, 0,
+                 GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
     for (int32_t i = 0; i < kShadowMaps; ++i) {
-        int32_t size = kShadowRequested[i];
-        if (driverMax > 0 && size > driverMax) size = driverMax;
-        ctx->shadowSize[i] = size;
-        glGenTextures(1, &ctx->shadowTex[i]);
-        glBindTexture(GL_TEXTURE_2D, ctx->shadowTex[i]);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, size, size, 0,
-                     GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
-
         glGenFramebuffers(1, &ctx->shadowFbo[i]);
         glBindFramebuffer(GL_FRAMEBUFFER, ctx->shadowFbo[i]);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, ctx->shadowTex[i], 0);
+        glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, ctx->shadowTex, 0, i);
         const bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
         glClear(GL_DEPTH_BUFFER_BIT);                   // vazio = tudo iluminado
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -222,10 +219,10 @@ void markTerrainShadowBox(RzContext* ctx, Vec3 lo, Vec3 hi) {
 void destroyShadowMaps(RzContext* ctx) {
     for (int32_t i = 0; i < kShadowMaps; ++i) {
         if (ctx->shadowFbo[i]) glDeleteFramebuffers(1, &ctx->shadowFbo[i]);
-        if (ctx->shadowTex[i]) glDeleteTextures(1, &ctx->shadowTex[i]);
         ctx->shadowFbo[i] = 0;
-        ctx->shadowTex[i] = 0;
     }
+    if (ctx->shadowTex) glDeleteTextures(1, &ctx->shadowTex);
+    ctx->shadowTex = 0;
 }
 
 // Calcula as matrizes das cascatas e redesenha as que precisam. Usa o olho
@@ -263,7 +260,7 @@ void renderShadowMaps(RzContext* ctx) {
         ctx->terrainShadowDirty = false;
         ctx->terrainShadowAll = false;
         ctx->shadowMatrix[0] = ctx->shadowMatrix[1] = ctx->shadowMatrix[2];
-        ctx->shadowTexel[0] = ctx->shadowTexel[1] = ctx->shadowTexel[2] = 2.0f * radius / float(ctx->shadowSize[2]);
+        ctx->shadowTexel[0] = ctx->shadowTexel[1] = ctx->shadowTexel[2] = 2.0f * radius / float(ctx->shadowSize);
         glDisable(GL_POLYGON_OFFSET_FILL);
         return;
     }
@@ -275,14 +272,14 @@ void renderShadowMaps(RzContext* ctx) {
         Vec3 center;
         const float d0 = i == 0 ? 0.0f : splits[i] - blend;
         float half = sliceSphere(ctx, d0, splits[i + 1], &center);
-        half += 2.0f * half / float(ctx->shadowSize[i]);        // + texels do PCF
+        half += 2.0f * half / float(ctx->shadowSize);        // + texels do PCF
         // Tamanho em degraus de kCascadeSizeStep (arredonda para cima): mudando
         // o FOV, a caixa não muda de tamanho todo frame, e entre os degraus o
         // encaixe em texels (snappedBox) segura a sombra parada
         const float stepLog = logf(kCascadeSizeStep);
         half = expf(ceilf(logf(half) / stepLog) * stepLog);
-        ctx->shadowTexel[i] = 2.0f * half / float(ctx->shadowSize[i]);
-        const ShadowBox box = snappedBox(view, center, half, ctx->shadowSize[i]);
+        ctx->shadowTexel[i] = 2.0f * half / float(ctx->shadowSize);
+        const ShadowBox box = snappedBox(view, center, half, ctx->shadowSize);
         ctx->shadowMatrix[i] = boxProjection(ctx, box) * view;
         beginPass(ctx, i, ctx->shadowMatrix[i]);
         drawTerrainDepth(ctx, view, box);
@@ -308,8 +305,8 @@ void renderShadowMaps(RzContext* ctx) {
             ctx->cascadeFarHalf = farHalf;
             ++ctx->cascadeFarRedraws;
         }
-        const ShadowBox box = snappedBox(view, ctx->cascadeFarCenter, ctx->cascadeFarHalf, ctx->shadowSize[2]);
-        ctx->shadowTexel[2] = 2.0f * ctx->cascadeFarHalf / float(ctx->shadowSize[2]);
+        const ShadowBox box = snappedBox(view, ctx->cascadeFarCenter, ctx->cascadeFarHalf, ctx->shadowSize);
+        ctx->shadowTexel[2] = 2.0f * ctx->cascadeFarHalf / float(ctx->shadowSize);
         ctx->shadowMatrix[2] = boxProjection(ctx, box) * view;
         beginPass(ctx, 2, ctx->shadowMatrix[2]);
         drawTerrainDepth(ctx, view, box);
@@ -319,7 +316,7 @@ void renderShadowMaps(RzContext* ctx) {
         // rzUpdateTerrain: só o retângulo de texels onde a caixa alterada cai
         // (8 cantos) + folga para o PCF e o polygon offset
         const Mat4& m = ctx->shadowMatrix[2];
-        const int32_t size = ctx->shadowSize[2];
+        const int32_t size = ctx->shadowSize;
         float x0 = 1.0e30f, y0 = 1.0e30f, x1 = -1.0e30f, y1 = -1.0e30f;
         for (int32_t k = 0; k < 8; ++k) {
             const Vec3 p = { (k & 1) ? ctx->terrainShadowHi.x : ctx->terrainShadowLo.x,
@@ -357,21 +354,16 @@ void initShadowUniforms(GLuint program, ShadowUniforms& u) {
     u.cascade  = glGetUniformLocation(program, "uCascade");
     u.onlyFar  = glGetUniformLocation(program, "uCascadeOnlyFar");
     u.offset   = glGetUniformLocation(program, "uShadowOffset");
-    const char* names[kShadowMaps] = { "uShadow0", "uShadow1", "uShadow2" };
+    u.map      = glGetUniformLocation(program, "uShadow");
     glUseProgram(program);
-    for (int32_t i = 0; i < kShadowMaps; ++i) {
-        u.maps[i] = glGetUniformLocation(program, names[i]);
-        glUniform1i(u.maps[i], kUnitShadowFirst + i);
-    }
+    glUniform1i(u.map, kUnitShadow);
     glUniform1f(glGetUniformLocation(program, "uShadowTerminator"), kShadowTerminator);
 }
 
 // Programa já em uso. Deixa a unidade de textura 0 ativa.
 void bindShadowMaps(const RzContext* ctx, const ShadowUniforms& u) {
-    for (int32_t i = 0; i < kShadowMaps; ++i) {
-        glActiveTexture(GL_TEXTURE0 + GLenum(kUnitShadowFirst + i));
-        glBindTexture(GL_TEXTURE_2D, ctx->shadowTex[i]);
-    }
+    glActiveTexture(GL_TEXTURE0 + GLenum(kUnitShadow));
+    glBindTexture(GL_TEXTURE_2D_ARRAY, ctx->shadowTex);
     glActiveTexture(GL_TEXTURE0);
     setMatrices(u.matrices, ctx->shadowMatrix, kShadowMaps);
     const float cs = ctx->cellSize;

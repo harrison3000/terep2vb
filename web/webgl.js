@@ -106,8 +106,8 @@ export function webglImports(canvas, getMemory) {
         glDeleteFramebuffers: (n, p) => remove(n, p, (f) => gl.deleteFramebuffer(f)),
         glBindFramebuffer: (target, n) => gl.bindFramebuffer(target, obj(n)),
         glCheckFramebufferStatus: (target) => gl.checkFramebufferStatus(target),
-        glFramebufferTexture2D: (target, attachment, textarget, n, level) =>
-            gl.framebufferTexture2D(target, attachment, textarget, obj(n), level),
+        glFramebufferTextureLayer: (target, attachment, n, level, layer) =>
+            gl.framebufferTextureLayer(target, attachment, obj(n), level, layer),
 
         glCreateShader: (type) => create(gl.createShader(type)),
         glDeleteShader: (n) => { gl.deleteShader(obj(n)); objects.delete(n); },
@@ -171,5 +171,7 @@ export function webglImports(canvas, getMemory) {
         glVertexAttrib4f: (i, x, y, z, w) => gl.vertexAttrib4f(i, x, y, z, w),
         glEnableVertexAttribArray: (i) => gl.enableVertexAttribArray(i),
         glDrawArrays: (mode, first, count) => gl.drawArrays(mode, first, count),
+        glDrawArraysInstanced: (mode, first, count, instances) => gl.drawArraysInstanced(mode, first, count, instances),
+        glVertexAttribDivisor: (i, divisor) => gl.vertexAttribDivisor(i, divisor),
     };
 }

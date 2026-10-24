@@ -119,8 +119,8 @@ RZ_GL(glGenFramebuffers)        void glGenFramebuffers(GLsizei n, GLuint* ids);
 RZ_GL(glDeleteFramebuffers)     void glDeleteFramebuffers(GLsizei n, const GLuint* ids);
 RZ_GL(glBindFramebuffer)        void glBindFramebuffer(GLenum target, GLuint id);
 RZ_GL(glCheckFramebufferStatus) GLenum glCheckFramebufferStatus(GLenum target);
-RZ_GL(glFramebufferTexture2D)   void glFramebufferTexture2D(GLenum target, GLenum attachment,
-                                                            GLenum texTarget, GLuint texture, GLint level);
+RZ_GL(glFramebufferTextureLayer) void glFramebufferTextureLayer(GLenum target, GLenum attachment,
+                                                              GLuint texture, GLint level, GLint layer);
 
 RZ_GL(glCreateShader)      GLuint glCreateShader(GLenum type);
 RZ_GL(glDeleteShader)      void glDeleteShader(GLuint shader);
@@ -165,6 +165,9 @@ RZ_GL(glVertexAttribI4i)      void glVertexAttribI4i(GLuint index, GLint x, GLin
 RZ_GL(glVertexAttrib4f)       void glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
 RZ_GL(glEnableVertexAttribArray) void glEnableVertexAttribArray(GLuint index);
 RZ_GL(glDrawArrays)         void glDrawArrays(GLenum mode, GLint first, GLsizei count);
+RZ_GL(glDrawArraysInstanced) void glDrawArraysInstanced(GLenum mode, GLint first, GLsizei count,
+                                                        GLsizei instances);
+RZ_GL(glVertexAttribDivisor) void glVertexAttribDivisor(GLuint index, GLuint divisor);
 
 #undef RZ_GL
 

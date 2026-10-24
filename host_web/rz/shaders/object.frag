@@ -2,7 +2,7 @@
 precision highp float;
 precision highp int;
 precision highp sampler2D;
-precision highp sampler2DShadow;
+precision highp sampler2DArrayShadow;
 flat in float vLight;
 flat in vec4 vColor;                      // cor sólida; alfa: 0 texturizado, 0,5 buraco, 1 cor sólida
 in vec2 vUV;
@@ -24,7 +24,7 @@ uniform vec3  uEye;
 uniform vec3  uFogOrigin;   // olho (seguindo) ou centro do mapa (visão geral)
 
 uniform sampler2D       uTexture;
-uniform sampler2DShadow uShadow0, uShadow1, uShadow2;
+uniform sampler2DArrayShadow uShadow;     // as três cascatas, uma por camada
 uniform vec3  uCascade;                   // fim da cascata 0, fim da 1, faixa de transição (mundo)
 uniform int   uCascadeOnlyFar;            // visão geral: só a cascata 2
 uniform float uShadowLight;               // luz na sombra (kShadowLight)
@@ -32,26 +32,27 @@ uniform float uShadowLight;               // luz na sombra (kShadowLight)
 out vec4 fragColor;
 
 // Sombra: 1 iluminado, 0 na sombra. Fora da caixa de um mapa, ele não sombreia.
-// sampler2DShadow com GL_LINEAR: PCF 2x2 do hardware. textureLod: o mapa não
-// tem mipmap e a leitura fica dentro de um if (sem derivadas).
-float shadowLit(sampler2DShadow map, vec3 c) {
+// sampler2DArrayShadow com GL_LINEAR: PCF 2x2 do hardware. textureGrad com
+// derivadas zero (nível 0): o mapa não tem mipmap e a leitura fica dentro de
+// um if (sem derivadas; o GLSL ES não tem textureLod para array shadow).
+float shadowLit(float cascade, vec3 c) {
     if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z > 1.0) return 1.0;
-    return textureLod(map, c, 0.0);
+    return textureGrad(uShadow, vec4(c.xy, cascade, c.z), vec2(0.0), vec2(0.0));   // nível 0
 }
 
 // Cascatas (rz_shadow.cpp): escolhe pela distância ao olho; numa faixa de
 // uCascade.z antes de cada divisa, mistura as duas vizinhas. Visão geral: só a 2.
 float shadowTerm() {
-    if (uCascadeOnlyFar != 0) return shadowLit(uShadow2, vShadow2);
+    if (uCascadeOnlyFar != 0) return shadowLit(2.0, vShadow2);
     float d = length(vWorld - uEye);
     float b = uCascade.z;
-    if (d < uCascade.x - b) return shadowLit(uShadow0, vShadow0);
+    if (d < uCascade.x - b) return shadowLit(0.0, vShadow0);
     if (d < uCascade.x)
-        return mix(shadowLit(uShadow0, vShadow0), shadowLit(uShadow1, vShadow1), (d - (uCascade.x - b)) / b);
-    if (d < uCascade.y - b) return shadowLit(uShadow1, vShadow1);
+        return mix(shadowLit(0.0, vShadow0), shadowLit(1.0, vShadow1), (d - (uCascade.x - b)) / b);
+    if (d < uCascade.y - b) return shadowLit(1.0, vShadow1);
     if (d < uCascade.y)
-        return mix(shadowLit(uShadow1, vShadow1), shadowLit(uShadow2, vShadow2), (d - (uCascade.y - b)) / b);
-    return shadowLit(uShadow2, vShadow2);
+        return mix(shadowLit(1.0, vShadow1), shadowLit(2.0, vShadow2), (d - (uCascade.y - b)) / b);
+    return shadowLit(2.0, vShadow2);
 }
 
 // Fator de neblina (0 limpo, 1 só neblina)

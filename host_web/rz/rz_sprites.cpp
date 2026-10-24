@@ -22,7 +22,8 @@
 // destino, sem culling. Cor = paleta x luz de uma face virada para cima (como
 // o chão plano), com neblina. Não projeta nem recebe sombra.
 //
-// Memória: o VBO (kMaxSprites x 6 vértices) e os vetores de trabalho são
+// Memória: o VBO (kMaxSprites instâncias, uma por sprite: um glDrawArraysInstanced
+// de 6 vértices, que o shader abre no quad) e os vetores de trabalho são
 // alocados na criação do contexto; rzSetSprites e o desenho não alocam.
 
 #include <algorithm>
@@ -138,7 +139,7 @@ bool createSprites(RzContext* ctx) {
 
     ctx->sprites.reserve(kMaxSprites);
     ctx->spriteOrder.reserve(kMaxSprites);
-    ctx->spriteStaging.resize(size_t(kMaxSprites) * 6);
+    ctx->spriteStaging.resize(size_t(kMaxSprites));
     setSpritePalette(ctx, nullptr);
     buildNoiseTexture(ctx);
 
@@ -146,20 +147,21 @@ bool createSprites(RzContext* ctx) {
     glGenBuffers(1, &ctx->spriteVbo);
     glBindVertexArray(ctx->spriteVao);
     glBindBuffer(GL_ARRAY_BUFFER, ctx->spriteVbo);
-    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(ctx->spriteStaging.size() * sizeof(SpriteVertex)),
+    glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(ctx->spriteStaging.size() * sizeof(SpriteInstance)),
                  nullptr, GL_DYNAMIC_DRAW);
-    const GLsizei stride = sizeof(SpriteVertex);
+    // Tudo por instância (divisor 1): um registro por sprite
+    const GLsizei stride = sizeof(SpriteInstance);
     glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(0));   // centro + raio
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 4, GL_BYTE, GL_FALSE, stride,                                 // canto, quadro, tipo
-                          reinterpret_cast<void*>(offsetof(SpriteVertex, cornerX)));
-    glEnableVertexAttribArray(1);
+    glVertexAttribIPointer(1, 2, GL_BYTE, stride,                                          // quadro, tipo
+                           reinterpret_cast<void*>(offsetof(SpriteInstance, frame)));
     glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, stride,                         // cor
-                          reinterpret_cast<void*>(offsetof(SpriteVertex, color)));
-    glEnableVertexAttribArray(2);
+                          reinterpret_cast<void*>(offsetof(SpriteInstance, color)));
     glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride,                                // opacidade
-                          reinterpret_cast<void*>(offsetof(SpriteVertex, opacity)));
-    glEnableVertexAttribArray(3);
+                          reinterpret_cast<void*>(offsetof(SpriteInstance, opacity)));
+    for (GLuint a = 0; a < 4; ++a) {
+        glEnableVertexAttribArray(a);
+        glVertexAttribDivisor(a, 1);
+    }
     glBindVertexArray(0);
     return glGetError() == GL_NO_ERROR;
 }
@@ -196,20 +198,17 @@ void drawSprites(RzContext* ctx, const Mat4& viewProj) {
     std::sort(ctx->spriteOrder.begin(), ctx->spriteOrder.end(),
               [](const SpriteKey& a, const SpriteKey& b) { return a.depth > b.depth; });
 
-    // Seis vértices por sprite (dois triângulos); o shader abre o quad
-    constexpr int8_t kCorners[6][2] = { { -1, -1 }, { 1, -1 }, { 1, 1 }, { -1, -1 }, { 1, 1 }, { -1, 1 } };
+    // Um registro por sprite, na ordem do desenho
     const uint32_t tick = ctx->frameCount / uint32_t(kSpriteFrameTicks);
-    SpriteVertex* v = ctx->spriteStaging.data();
+    SpriteInstance* v = ctx->spriteStaging.data();
     for (const SpriteKey& k : ctx->spriteOrder) {
         const Sprite& s = ctx->sprites[size_t(k.index)];
         const int8_t frame = int8_t((tick + uint32_t(k.index) * 3u) % uint32_t(kSpriteFrames));
-        for (const auto& c : kCorners) {
-            *v++ = { s.center.x, s.center.y, s.center.z, s.radius, s.opacity, c[0], c[1], frame, int8_t(s.type), s.color };
-        }
+        *v++ = { s.center.x, s.center.y, s.center.z, s.radius, s.opacity, frame, int8_t(s.type), {}, s.color };
     }
-    const GLsizei count = GLsizei(ctx->spriteOrder.size() * 6);
+    const GLsizei count = GLsizei(ctx->spriteOrder.size());
     glBindBuffer(GL_ARRAY_BUFFER, ctx->spriteVbo);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, GLsizeiptr(size_t(count) * sizeof(SpriteVertex)),
+    glBufferSubData(GL_ARRAY_BUFFER, 0, GLsizeiptr(size_t(count) * sizeof(SpriteInstance)),
                     ctx->spriteStaging.data());
 
     const SpriteProgram& p = ctx->spriteProgram;
@@ -229,7 +228,7 @@ void drawSprites(RzContext* ctx, const Mat4& viewProj) {
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);   // alfa do destino = byte reservado
     glDepthMask(GL_FALSE);
     glBindVertexArray(ctx->spriteVao);
-    glDrawArrays(GL_TRIANGLES, 0, count);
+    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, count);    // dois triângulos por sprite
     glDepthMask(GL_TRUE);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDisable(GL_BLEND);

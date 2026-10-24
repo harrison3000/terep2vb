@@ -149,17 +149,16 @@ constexpr float   kSmokeNoiseSpeed     = 0.4f;   // fumaça: avanço do ruído p
 // kCascadeFarRecenter tiles ou o terreno muda). Transição de kCascadeBlend
 // tiles entre elas. Na visão geral, só a 2, com o terreno inteiro e os objetos.
 constexpr int32_t kShadowMaps           = 3;
-// Tamanhos pedidos; limitados a GL_MAX_TEXTURE_SIZE na criação (ctx->shadowSize).
-constexpr int32_t kCascadeNearSize      = 2048;
-constexpr int32_t kCascadeMidSize       = 1024;
-constexpr int32_t kCascadeFarSize       = 2048;
+// As três numa textura array de profundidade (uma camada por cascata, todas
+// do mesmo lado); pedido, limitado a GL_MAX_TEXTURE_SIZE na criação (ctx->shadowSize).
+constexpr int32_t kShadowMapSize        = 2048;
 constexpr float   kCascadeSplit0        = 8.0f;   // tiles do olho
 constexpr float   kCascadeSplit1        = 30.0f;
 constexpr float   kCascadeBlend         = 2.0f;   // tiles de transição antes de cada divisa
 constexpr float   kCascadeFarRecenter   = 10.0f;  // tiles andados até refazer a cascata 2
 constexpr float   kCascadeFarMargin     = 4.0f;   // tiles além da neblina + recentragem
 constexpr int32_t kShadowScissorMargin  = 4;     // texels em volta da área refeita da cascata 2
-constexpr int32_t kUnitShadowFirst      = 1;      // unidades de textura 1..3 (0: atlas/objeto)
+constexpr int32_t kUnitShadow           = 1;      // unidade de textura das sombras (0: atlas/objeto)
 // Posições e índices de cada objeto num uniform block (ObjectData, nos
 // shaders object.vert e object_depth.vert, layout std140): kMaxObjectVertices
 // vec4 de posição e depois kMaxObjectIndices int, quatro por ivec4. 16 KB,
@@ -373,7 +372,7 @@ struct FogUniforms {
 
 struct ShadowUniforms {
     GLint matrices = -1, cascade = -1, onlyFar = -1, offset = -1;
-    GLint maps[kShadowMaps] = { -1, -1, -1 };
+    GLint map = -1;            // uShadow: a textura array
 };
 
 struct TerrainProgram {
@@ -423,12 +422,14 @@ struct Sprite {
     uint8_t  type;         // RZ_SPRITE_*
 };
 struct SpriteKey { float depth; int32_t index; };    // ordenação de trás para frente
-struct SpriteVertex {      // 28 bytes; seis por sprite
+struct SpriteInstance {    // 28 bytes; um por sprite (o shader abre o quad)
     float    x, y, z, radius;
     float    opacity;         // fumaça
-    int8_t   cornerX, cornerY, frame, type;
+    int8_t   frame, type;
+    uint8_t  pad[2];
     uint32_t color;           // B, G, R, 0 em bytes
 };
+static_assert(sizeof(SpriteInstance) == 28);
 
 struct DepthProgram {
     GLuint program = 0;
@@ -476,7 +477,7 @@ struct RzContext {
     // reservados na criação (kMaxSprites), sem alocar depois
     std::vector<rz::Sprite>       sprites;
     std::vector<rz::SpriteKey>    spriteOrder;
-    std::vector<rz::SpriteVertex> spriteStaging;
+    std::vector<rz::SpriteInstance> spriteStaging;
     uint32_t   spritePalette[256] = {};              // 0x00RRGGBB com luz (atlas ou cinza)
     rz::GLuint spriteVao = 0, spriteVbo = 0, spriteNoiseTex = 0;
     uint32_t   frameCount = 0;                       // rzRender chamados (quadro do ruído)
@@ -492,10 +493,10 @@ struct RzContext {
 
     // Sombras (rz_shadow.cpp): três mapas, FBO só com profundidade cada
     rz::GLuint shadowFbo[rz::kShadowMaps] = {};
-    rz::GLuint shadowTex[rz::kShadowMaps] = {};
+    rz::GLuint shadowTex = 0;                         // textura array, uma camada por cascata
     rz::Mat4   shadowMatrix[rz::kShadowMaps] = {};     // do frame; contíguas (glUniformMatrix4fv)
     float      shadowTexel[rz::kShadowMaps] = {};      // tamanho do texel de cada mapa (mundo)
-    int32_t    shadowSize[rz::kShadowMaps] = {};      // lado de cada mapa (já limitado pelo driver)
+    int32_t    shadowSize = 0;                       // lado dos mapas (já limitado pelo driver)
     bool       terrainShadowDirty = true;            // terreno mudou: cascata 2 refeita...
     bool       terrainShadowAll   = true;            // ...inteira, ou só a caixa abaixo (mundo)
     rz::Vec3   terrainShadowLo = { 0.0f, 0.0f, 0.0f }, terrainShadowHi = { 0.0f, 0.0f, 0.0f };
