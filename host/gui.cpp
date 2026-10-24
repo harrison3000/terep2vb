@@ -1,7 +1,6 @@
 /*
- * The window and its OpenGL context: OpenGL 3.3 core profile (what the
- * external renderer uses; the ImGui OpenGL3 backend loads its own
- * functions).  The host itself only calls OpenGL 1.1 functions, which every
+ * The window and its OpenGL context: OpenGL 3.3 core profile (the ImGui
+ * OpenGL3 backend's, which loads its own functions).  The host itself only calls OpenGL 1.1 functions, which every
  * OpenGL library exports, so it needs no loader of its own.
  */
 #include <cstdio>
@@ -22,7 +21,6 @@ SDL_Window *gui_open(int w, int h)
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
 #endif
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);     // the external renderer needs it
     window = SDL_CreateWindow("Terep2 vibe code edition", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, w, h,
                               SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
     if (!window || !(context = SDL_GL_CreateContext(window))) {
@@ -64,7 +62,7 @@ void gui_event(const SDL_Event &e)
 
 void gui_begin()
 {
-    int w, h;                                   // cleared here: a renderer draws before gui_end
+    int w, h;
     SDL_GL_GetDrawableSize(window, &w, &h);
     glViewport(0, 0, w, h);
     glClearColor(0, 0, 0, 1);

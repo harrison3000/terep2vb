@@ -2,9 +2,7 @@
 // (prefs.txt in SDL's preference directory: ~/.local/share/terep2vibed on
 // Linux, %APPDATA%\terep2vibed on Windows), one "key: value" per line:
 //
-//   renderer: opengl
 //   scale: 3
-//   draw-distance: 30
 //   minimap: on
 //   sound: on
 //   fix-ice-bug: on

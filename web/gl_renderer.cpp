@@ -1,7 +1,6 @@
 /*
- * The page's OpenGL renderer: host/renderer_gl.cpp (the SDL host's) made for
- * the web, with the web's own copy of the library (web/rz, WebGL 2 on the
- * page's canvas).  The library draws the map and the cars its own way, with
+ * The page's OpenGL renderer: the game's side of the renderizeitor library
+ * (web/rz, WebGL 2 on the page's canvas), which once was the SDL host's.  The library draws the map and the cars its own way, with
  * its own camera and textures; the game's own drawing (game_frame) is not
  * called, so what game_frame does besides drawing is done here: the engine
  * sound, the keys that change the game (Tab, Q, [, ], F9) and the text, which
@@ -14,7 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include "../host/host.hpp"
-#include "../host/vec3f.hpp"
+#include "vec3f.hpp"
 #include "rz/renderizeitor.h"
 #include "web.hpp"
 

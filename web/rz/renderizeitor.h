@@ -1,5 +1,5 @@
 /* O renderer do jogo na página: WebGL 2 no canvas (feito a partir do
-   renderizeitor, host/renderizeitor, só para o web). Compilado junto com o
+   renderizeitor, github.com/harrison3000/renderizeitor, só para o web). Compilado junto com o
    jogo em terep2.wasm; as chamadas WebGL são imports feitos por web/webgl.js. */
 #pragma once
 

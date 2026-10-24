@@ -6,7 +6,3 @@
 	path = host/Nuked-OPL3
 	url = https://github.com/tgies/Nuked-OPL3-fast
 	shallow = true
-[submodule "host/renderizeitor"]
-	path = host/renderizeitor
-	url = https://github.com/harrison3000/renderizeitor
-	shallow = true

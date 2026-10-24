@@ -8,21 +8,19 @@
  * (prefs.hpp), at mapdir with it selected if given, else where the last map
  * was chosen.
  *
- * Esc pauses the game with a menu: the render scale (software renderer)
- * and the minimap; Esc again resumes, and its button goes back to the
- * chooser.
+ * Esc pauses the game with a menu: the render scale and the minimap; Esc
+ * again resumes, and its button goes back to the chooser.
  */
 #include <algorithm>
 #include <climits>
 #include <filesystem>
 #include <cstdlib>
 #include <string>
-#include <string_view>
 #include <unistd.h>
 #include <vector>
 #include <SDL.h>
 #include "host.hpp"
-#include "game_renderer.hpp"
+#include "renderer_sw.hpp"
 #include "gui.hpp"
 #include "launcher.hpp"
 #include "minimap.hpp"
@@ -110,31 +108,23 @@ static void fit_window()
 }
 
 // The Esc menu: the game is paused while it is open, and Esc resumes it.
-// The software renderer can change the scale; both, the minimap.  Returns
-// true when its button ends the game.
-static bool esc_menu(const GameRenderer &renderer, HostOptions *host, Minimap **mini, bool *open)
+// The scale and the minimap.  Returns true when its button ends the game.
+static bool esc_menu(HostOptions *host, Minimap **mini, bool *open)
 {
     bool end = false;
     const ImGuiViewport *vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     ImGui::Begin("Paused", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
                                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
-    if (std::string_view(renderer.name) == "software") {
-        int scale = render_scale;
-        ImGui::SetNextItemWidth(200);
-        ImGui::SliderInt("Render scale", &scale, 1, MAX_RENDER_SCALE, "%dx");
-        if (scale != render_scale)
-            game_set_scale(scale);
-        if (ImGui::IsItemDeactivatedAfterEdit())
-            fit_window();
-        ImGui::SameLine();
-        ImGui::TextDisabled("%d x %d", screen_w(), screen_h());
-    }
-    if (std::string_view(renderer.name) == "opengl") {
-        ImGui::SetNextItemWidth(200);
-        if (ImGui::SliderInt("Draw distance", &host->draw_distance, DRAW_DISTANCE_MIN, DRAW_DISTANCE_MAX))
-            opengl_set_draw_distance(host->draw_distance);      // seen at once, the game is drawn while paused
-    }
+    int scale = render_scale;
+    ImGui::SetNextItemWidth(200);
+    ImGui::SliderInt("Render scale", &scale, 1, MAX_RENDER_SCALE, "%dx");
+    if (scale != render_scale)
+        game_set_scale(scale);
+    if (ImGui::IsItemDeactivatedAfterEdit())
+        fit_window();
+    ImGui::SameLine();
+    ImGui::TextDisabled("%d x %d", screen_w(), screen_h());
     if (ImGui::Checkbox("Minimap", &host->minimap)) {
         delete *mini;
         *mini = host->minimap ? new Minimap() : nullptr;
@@ -151,13 +141,10 @@ static bool esc_menu(const GameRenderer &renderer, HostOptions *host, Minimap **
 
 // The game loop: physics at 120 Hz, the picture at 60 Hz.  Esc opens the
 // menu above.
-static Ending run(const GameRenderer &renderer, HostOptions *host)
+static Ending run(HostOptions *host)
 {
-    opengl_set_draw_distance(host->draw_distance);
-    if (!renderer.start()) {
-        fprintf(stderr, "the %s renderer could not start\n", renderer.name);
+    if (!software_start())
         return Ending::FAILED;
-    }
     Minimap *mini = host->minimap ? new Minimap() : nullptr;
 
     const uint64_t freq = SDL_GetPerformanceFrequency();
@@ -184,11 +171,8 @@ static Ending run(const GameRenderer &renderer, HostOptions *host)
 
         uint64_t now = SDL_GetPerformanceCounter();
         while (now >= next_tick) {          // 120 Hz physics, stopped while the menu is open
-            if (!menu) {
+            if (!menu)
                 physics_tick();
-                if (renderer.tick)
-                    renderer.tick();
-            }
             next_tick += freq / 120;
         }
         if (now >= next_frame) {            // 60 Hz display
@@ -198,11 +182,11 @@ static Ending run(const GameRenderer &renderer, HostOptions *host)
             gui_begin();
             const ImVec2 win = ImGui::GetIO().DisplaySize;
             PictureRect at;
-            if (!renderer.frame((int)win.x, (int)win.y, &at))
+            if (!software_frame((int)win.x, (int)win.y, &at))
                 running = false;
             // the menu first: turning the minimap off deletes its texture, which
             // must not be in this frame's draw lists any more
-            if (menu && esc_menu(renderer, host, &mini, &menu))
+            if (menu && esc_menu(host, &mini, &menu))
                 running = false;
             if (mini)
                 mini->draw(ImGui::GetForegroundDrawList(), at.x0, at.y0, at.k, screen_w(), screen_h());
@@ -212,7 +196,7 @@ static Ending run(const GameRenderer &renderer, HostOptions *host)
         }
     }
     delete mini;
-    renderer.stop();
+    software_stop();
     return end;
 }
 
@@ -235,7 +219,7 @@ static Ending play(const std::string &map, HostOptions &host)
     else if (game_init() != 0 || world.num_cars <= 0)
         fprintf(stderr, "could not load the map in %s (no car1.dat?)\n", map.c_str());
     else
-        end = run(game_renderers[host.renderer], &host);
+        end = run(&host);
     opl_sound_stop();
     host_free_game();
     if (chdir(here) != 0)

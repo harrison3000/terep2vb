@@ -1,4 +1,4 @@
-// A 3-vector of floats for the hosts' own maths (the OpenGL renderer's
+// A 3-vector of floats for the web host's own maths (the OpenGL renderer's
 // cameras), with the usual operators.  Same layout as the library's RzVertex
 // (x, y, z), but converted explicitly where the library is called.
 #pragma once

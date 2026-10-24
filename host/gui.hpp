@@ -1,7 +1,6 @@
 // The SDL host's window: one OpenGL 3.3 core context, owned by the host, with Dear
 // ImGui (SDL2 + OpenGL3 backends) on it.  The map chooser, the game's
-// picture and the minimap are all drawn through ImGui; another renderer can
-// draw into the same context before the ImGui overlay (see renderer_api.hpp).
+// picture and the minimap are all drawn through ImGui.
 #pragma once
 #include <cstdint>
 #include <SDL.h>
