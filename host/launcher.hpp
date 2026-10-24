@@ -5,16 +5,10 @@
 #include <string>
 #include <SDL.h>
 
-// The OpenGL renderer's draw distance (opengl_set_draw_distance): the fog's
-// start, in map tiles.
-constexpr int DRAW_DISTANCE_MIN = 1, DRAW_DISTANCE_DEFAULT = 30, DRAW_DISTANCE_MAX = 110;
-
 // What the SDL host does around the game (not options of the game itself).
 struct HostOptions {
     bool no_sound = false;          // "Disable sound": no audio device, no OPL emulator
     bool minimap = false;           // the map and the cars in the bottom right corner
-    int renderer = 0;               // index in game_renderers (game_renderer.hpp)
-    int draw_distance = DRAW_DISTANCE_DEFAULT;  // OpenGL renderer: where the fog starts, in tiles
 };
 
 // Runs until the player picks a map (true, *map set) or closes the

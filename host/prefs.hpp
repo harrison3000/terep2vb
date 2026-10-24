@@ -1,10 +1,8 @@
 // The map chooser's preferences, kept between runs in a small text file
-// (prefs.txt in SDL's preference directory: ~/.local/share/terep2vibed on
-// Linux, %APPDATA%\terep2vibed on Windows), one "key: value" per line:
+// (prefs.txt in SDL's preference directory: ~/.local/share/terep2vb on
+// Linux, %APPDATA%\terep2vb on Windows), one "key: value" per line:
 //
-//   renderer: opengl
 //   scale: 3
-//   draw-distance: 30
 //   minimap: on
 //   sound: on
 //   fix-ice-bug: on

@@ -3,7 +3,7 @@
 // allows, keeping its shape.
 #include <algorithm>
 #include <vector>
-#include "game_renderer.hpp"
+#include "renderer_sw.hpp"
 #include "gui.hpp"
 #include "host.hpp"
 

@@ -16,16 +16,16 @@ that corrupts the title) and a crash of the original that the port does not repr
 ## Building and running
 
 ```sh
-git submodule update --init   # Dear ImGui and Nuked-OPL3 (host/imgui, host/Nuked-OPL3), for terep2vibed
+git submodule update --init   # Dear ImGui and Nuked-OPL3 (host/imgui, host/Nuked-OPL3), for terep2vb
 make            # terep2-headless: test host, no dependencies
-make sdl        # terep2vibed: playable SDL2 + OpenGL 3.3 version, with the OpenGL renderer (needs libsdl2-dev, OpenGL, EGL and the submodules)
-make no_gl      # the same, without the OpenGL renderer (software only)
+make sdl        # terep2vb: playable SDL2 + OpenGL 3.3 version (needs libsdl2-dev, OpenGL and the submodules)
 make test       # replays the Win16 recordings in tests/ and compares the frames
 make -j8 all sdl  # in parallel: each source is its own object in build/, rebuilt when its headers change
 make coverage  # which lines of src/ the tests run (clang/LLVM): summary, and build/cov/html
 make coverage REPLAY="rec/dir data/Map"  # the same for one recording only
-./terep2vibed              # opens the map chooser where the last map was chosen
-./terep2vibed data/Asphalt # opens it with that map selected
+make wasm-test  # the test host built for WebAssembly (wasm32-wasip1: clang + wasi-libc/libc++, no Emscripten), replays run with node
+./terep2vb                 # opens the map chooser where the last map was chosen
+./terep2vb data/Asphalt    # opens it with that map selected
 ```
 
 C++17 with GNU extensions (`__attribute__((packed))` for the PCX header, `-fwrapv` and `#embed`), so it builds with
@@ -33,26 +33,15 @@ g++ 15+ or clang++ 19+. Tested on Linux x86-64 with both. The code does not depe
 size, but it has not been tested on 32 bits. Physics runs at 120 Hz and the display at 60 Hz, as
 in the Win16 port. The game's window opens at the size of the picture at the chosen scale,
 enlarged to at least 960x600 and reduced by a whole factor if it does not fit on the screen.
-Esc pauses the game and opens a small menu: the render scale (software renderer only; the
+Esc pauses the game and opens a small menu: the render scale (the
 window follows it) and the minimap. Esc again resumes; the menu's button goes back to the
 chooser, where another map (or other options) can be picked. Each game starts from scratch: `game_init` resets
 the global state (`state_reset`) and everything the game allocated (`game_free`).
 
 Window: the SDL host owns one OpenGL 3.3 core context (`host/gui.cpp`). The map chooser, the
 game's picture (the software renderer's frame, as a texture, scaled to the window keeping its
-shape) and the minimap all go through Dear ImGui on it. An external OpenGL renderer can draw into
-the same context; `host/renderer_api.hpp` gives it the context, the real paths of the map's files
-(`map_files()`) and the map's height and tile layers (`map_layers()`). The renderer is chosen in
-the map chooser ("Renderer"): `software` (the default, the game's own picture) or
-`opengl`, Harrison's renderizeitor library (the submodule `host/renderizeitor`), which
-`make sdl` builds with its own Makefile and links in. `make no_gl` (or `make sdl NO_GL=1`)
-builds the host without it, with only the software renderer; switching between the two rebuilds
-what changes, nothing has to be removed. The library's calls go
-in `host/renderer_gl.cpp`, at the lines marked `LIB:`; in that mode `game_frame()` is not called,
-so the host plays the engine sound and handles Tab, Q, `[`, `]` and F9 itself. Its draw distance
-(where the fog starts, 1 to 110 tiles, 30 by default) is a slider in the chooser and in the Esc
-menu, which shows the change at once (`rzSetFog`). What is still to do
-for it is in [TODO-lib.md](TODO-lib.md).
+shape) and the minimap all go through Dear ImGui on it. The SDL host draws only the game's own
+picture; the OpenGL renderer is the web page's (below).
 
 Sound: the game writes the AdLib (OPL2) registers as the original did to ports 388h/389h
 (`src/sound.cpp`: an engine voice per view and the crash effect); the SDL host plays them through
@@ -68,7 +57,7 @@ its reference point is; x is to the right and y down, so a camera turned to yaw 
 minimap. It is drawn over the game's picture through ImGui (`host/minimap.cpp`), so the
 game's picture and the tests do not change.
 
-`terep2vibed` opens a map chooser (Dear ImGui): the directories on the left, starting where
+`terep2vb` opens a map chooser (Dear ImGui): the directories on the left, starting where
 the last map was chosen, or at the map directory given on the command line (its only argument),
 with that map selected (`[map]` marks those with a `map.pcx` and a
 `col.pcx`); on the right a preview of the selected map, its terrain turning, drawn with the
@@ -79,9 +68,9 @@ plays the map, like the Play button (which needs a `car1.dat` too). The chooser
 lives in `host/` (`launcher.cpp`, `voxel_preview.cpp`, `pcx.cpp`, with its own PCX reader) and
 does not touch the game code.
 
-The chooser's choices (renderer, scale, draw distance, minimap, sound, extra options and the last map) are
+The chooser's choices (scale, minimap, sound, extra options and the last map) are
 kept in `prefs.txt`, one `key: value` per line, in SDL's preference directory
-(`~/.local/share/terep2vibed` on Linux, `%APPDATA%\terep2vibed` on Windows). They are read when the
+(`~/.local/share/terep2vb` on Linux, `%APPDATA%\terep2vb` on Windows). They are read when the
 chooser opens and written when a game starts, only if something changed.
 
 Extra options are fixes of bugs of the original, or other changes to what it does; without
@@ -93,6 +82,27 @@ and kept in `extra_options`, which the map chooser shows as checkboxes:
 |---|---|
 | `fix-ice-bug` | broken ice no longer wraps around to the highest terrain (see below) |
 | `hide-banner` | hides the "GAMBIARRA FOREVER!" line that the Win16 port draws at the bottom |
+
+### In a web page
+
+`make web` builds the game as WebAssembly (`web/terep2.wasm`, about 300 KB: clang for
+wasm32-wasip1 with the WASI libc and libc++, no Emscripten) with its own small host,
+`host_web/web_main.cpp`. The page (`web/index.html`, `web/terep2.js`: `web/` is only what is served) asks for a folder, finds the maps
+in it and reads their files right there in the browser (nothing is uploaded), then runs the game
+on a canvas with the keyboard, physics at 120 Hz and the picture at 60 Hz as in the SDL host. The
+page needs to be served, not opened as a file:
+
+    make web && python3 -m http.server -d web
+
+and then http://localhost:8000. The sound is the same AdLib emulation (Nuked-OPL3, in the module
+too, played through an AudioWorklet), and there is the same minimap, in the bottom right corner
+of the window. Both renderers: the software one, and the OpenGL one, drawn with WebGL 2:
+`host_web/gl_renderer.cpp` (the game's side) and `host_web/rz`, the renderer itself (from Harrison's
+[renderizeitor](https://github.com/harrison3000/renderizeitor): GLSL ES 3.00 shaders, PCX files
+from memory, the page's canvas), whose WebGL calls are imports of the module done one for one by
+`web/webgl.js`. The page draws the text over it; the draw distance (where the fog starts, 1 to
+110 tiles) is a slider by the map list. No map preview; Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
+the replays give the same frames as the Win16 port there too.
 
 ### Higher resolution
 
@@ -155,9 +165,7 @@ host/
   common.cpp    starting and freeing a game, time step, case-insensitive file opening
   sdl_main.cpp  SDL2 host
   gui.cpp       its window: one OpenGL 3.3 core context, with ImGui (OpenGL3 backend) on it
-  renderer_api.hpp  what an external OpenGL renderer gets: the context, the map's files and layers
-  game_renderer.cpp the renderers to choose from; renderer_sw.cpp (the game's picture),
-                renderer_gl.cpp (the renderizeitor library, left out by make no_gl)
+  renderer_sw.cpp the game's picture, as a texture scaled to the window
   launcher.cpp  map chooser (Dear ImGui) shown when no map is given
   prefs.cpp     the chooser's preferences file (prefs.txt, "key: value" per line)
   voxel_preview.cpp  the chooser's preview: the map's terrain in voxel space
@@ -166,6 +174,10 @@ host/
   minimap.cpp   the optional minimap drawn over the game's picture
   imgui/        Dear ImGui (git submodule)
   Nuked-OPL3/   OPL3 emulator (git submodule, LGPL 2.1)
+host_web/       the web host (WebAssembly): web_main.cpp, and the OpenGL renderer with WebGL 2,
+                gl_renderer.cpp and rz/ (the renderer)
+web/            the web page, what is served: index.html, terep2.js, webgl.js, opl_player.js and,
+                once built, terep2.wasm
 host_test/      the test host (terep2-headless)
   main.cpp      replays a recording of the Win16 port and compares the frames
 data/           the maps (not in the repository)

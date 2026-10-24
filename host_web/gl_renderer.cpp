@@ -1,148 +1,124 @@
 /*
- * The external OpenGL renderer (Harrison's library).  The library draws the
- * map and the cars its own way, with its own camera and textures, into the
- * host's OpenGL 3.3 core context; the game's own drawing (game_frame) is not
+ * The page's OpenGL renderer: the game's side of the renderizeitor library
+ * (rz/, WebGL 2 on the page's canvas), which once was the SDL host's.  The
+ * library draws the map and the cars its own way, with its own camera and
+ * textures; the game's own drawing (game_frame) is not
  * called, so what game_frame does besides drawing is done here: the engine
- * sound, the keys that change the game (Tab, Q, [, ], F9) and the text.
- *
- * The calls into the library are marked LIB: they are compiled only with
- * the library (make sdl; not with make no_gl).  What else it will need: TODO-lib.md.
+ * sound, the keys that change the game (Tab, Q, [, ], F9) and the text, which
+ * the page draws over the canvas (web_text).
  *
  * This file has a surprising amount of human generated code and gambiarras :)
  *
  */
 #include <algorithm>
 #include <cmath>
-#include <string>
-#include "imgui.h"
-#include "game_renderer.hpp"
-#include "gui.hpp"
-#include "launcher.hpp"
-#include "renderer_api.hpp"
+#include <cstdio>
+#include "../host/host.hpp"
 #include "vec3f.hpp"
+#include "rz/renderizeitor.h"
+#include "web.hpp"
 
-#ifdef TEREP2_GLR
-    #include <SDL_opengl.h>
-    #include "renderizeitor/include/renderizeitor.h"
-    static RzContext* ctx;
+static RzContext* ctx;
 
-    // The internal camera's filter (IIR, one step per physics tick,
-    // opengl_tick): the reference vertex and the camera's axes of the car it
-    // is on.  Only while it is on (the library smooths the other cameras);
-    // restarted when the car or the camera changes.
-    struct CamFilter {
-        bool ready;                 // false: start from the next sample
-        Vec3f pos;                  // the reference vertex (camera_pt), in tiles
-        Vec3f vel;                  // its velocity, per tick, filtered
-        Vec3f fwd, up;              // where the internal camera looks, and its up
+// The internal camera's filter (IIR, one step per physics tick,
+// gl_tick): the reference vertex and the camera's axes of the car it
+// is on.  Only while it is on (the library smooths the other cameras);
+// restarted when the car or the camera changes.
+struct CamFilter {
+    bool ready;                 // false: start from the next sample
+    Vec3f pos;                  // the reference vertex (camera_pt), in tiles
+    Vec3f vel;                  // its velocity, per tick, filtered
+    Vec3f fwd, up;              // where the internal camera looks, and its up
 
-        void step(Car &car, uint16_t camera_pt, bool up_bias);  // one tick; up_bias: F2
-    };
+    void step(Car &car, uint16_t camera_pt, bool up_bias);  // one tick; up_bias: F2
+};
 
-    struct carrodef_s{
-        int32_t id;
-        int16_t n_points;
-        uint16_t camera_pt;
-    };
+struct carrodef_s{
+    int32_t id;
+    int16_t n_points;
+    uint16_t camera_pt;
+};
 
-    carrodef_s carros[5];
-    int currTgt = 0;
-    // The camera of F1..F5: the low 4 bits the library's mode (RZ_CAMERA_*),
-    // CAM_UP for F2 (the internal one looking a little up, filtered more):
-    // F1 0x01, F2 0x11.
-    constexpr int CAM_UP = 0x10;
-    static int cam_mode = RZ_CAMERA_FOLLOW;
-    static bool cam_internal() { return (cam_mode & 0x0f) == RZ_CAMERA_INTERNAL; }
-    static CamFilter cam_filter;
+carrodef_s carros[5];
+int currTgt = 0;
+// The camera of F1..F5: the low 4 bits the library's mode (RZ_CAMERA_*),
+// CAM_UP for F2 (the internal one looking a little up, filtered more):
+// F1 0x01, F2 0x11.
+constexpr int CAM_UP = 0x10;
+static int cam_mode = RZ_CAMERA_FOLLOW;
+static bool cam_internal() { return (cam_mode & 0x0f) == RZ_CAMERA_INTERNAL; }
+static CamFilter cam_filter;
 
-    static void updateCars();
-    static int isLine(uint16_t[], int);
-    static void loadCar(int, std::string);
-    static void updateSprites();
-    static void updateCamDists();
+static void updateCars();
+static int isLine(uint16_t[], int);
+static void loadCar(int);
+static void updateSprites();
+static void updateCamDists();
 
-    #define F_8_24(_val) ({ \
-        const float scale = 1.0f / (float)(1 << 24); \
-        float vv = _val;   \
-        vv * scale;        \
-    })
+#define F_8_24(_val) ({ \
+    const float scale = 1.0f / (float)(1 << 24); \
+    float vv = _val;   \
+    vv * scale;        \
+})
 
-    #define F_UV(_u, _v, _uv) ({ \
-        TexCoord uv_ = (_uv); \
-        float scale = 1.0f / 65535.0f;      \
-        _u = (float)uv_.u * scale; \
-        _v = (float)uv_.v * scale; \
-    })
+#define F_UV(_u, _v, _uv) ({ \
+    TexCoord uv_ = (_uv); \
+    float scale = 1.0f / 65535.0f;      \
+    _u = (float)uv_.u * scale; \
+    _v = (float)uv_.v * scale; \
+})
 
-    extern int broke_some_ice;
+extern int broke_some_ice;
 
-    // How much of the way to the new sample the filters go each tick
-    // (120 Hz): light for F1, which follows the car, stronger for F2.
-    constexpr float CAM_FILTER_F1 = 0.35f;
-    constexpr float CAM_FILTER_F2 = 0.12f;
-    constexpr float CAM_FILTER_POS = 0.5f;
-    constexpr float CAM_FILTER_VEL = 0.20f;  // the reference vertex's velocity, for the position
-    constexpr float CAM_UP_BIAS_F2 = 0.7f;  // F2's up leans towards the sky
+// How much of the way to the new sample the filters go each tick
+// (120 Hz): light for F1, which follows the car, stronger for F2.
+constexpr float CAM_FILTER_F1 = 0.35f;
+constexpr float CAM_FILTER_F2 = 0.12f;
+constexpr float CAM_FILTER_POS = 0.5f;
+constexpr float CAM_FILTER_VEL = 0.20f;  // the reference vertex's velocity, for the position
+constexpr float CAM_UP_BIAS_F2 = 0.7f;  // F2's up leans towards the sky
 
-    // Field of view (vertical, degrees): fixed in the internal cameras; in the
-    // chase camera FOV_SLOW up to FOV_SLOW_SPEED, then up to FOV_FAST at FOV_FAST_SPEED
-    // and over (tiles per tick; 0.1 is 12 tiles a second), squared in
-    // between; the other cameras keep the library's default.  Each frame
-    // fov_target is set for the camera and fov_current goes FOV_FILTER of the
-    // way to it (about half a second to settle): no jump in a crash, nor when
-    // changing camera.
-    constexpr float FOV_INTERNAL = 60, FOV_SLOW = 50, FOV_FAST = 70, FOV_DEFAULT = 50;
-    constexpr float FOV_SLOW_SPEED = 0.03f, FOV_FAST_SPEED = 0.1f, FOV_FILTER = 0.04f;
-    static float fov_target = FOV_SLOW, fov_current = FOV_SLOW;
+// Field of view (vertical, degrees): fixed in the internal cameras; in the
+// chase camera FOV_SLOW up to FOV_SLOW_SPEED, then up to FOV_FAST at FOV_FAST_SPEED
+// and over (tiles per tick; 0.1 is 12 tiles a second), squared in
+// between; the other cameras keep the library's default.  Each frame
+// fov_target is set for the camera and fov_current goes FOV_FILTER of the
+// way to it (about half a second to settle): no jump in a crash, nor when
+// changing camera.
+constexpr float FOV_INTERNAL = 60, FOV_SLOW = 50, FOV_FAST = 70, FOV_DEFAULT = 50;
+constexpr float FOV_SLOW_SPEED = 0.03f, FOV_FAST_SPEED = 0.1f, FOV_FILTER = 0.04f;
+static float fov_target = FOV_SLOW, fov_current = FOV_SLOW;
 
-    // b -> a, from the 16.16 positions (any unit: only directions are used)
-    static Vec3f delta(const Pos &a, const Pos &b)
-    {
-        Vec3 d = a - b;
-        return { (float)d.x, (float)d.y, (float)d.z };
-    }
-
-    // A vertex of the game in the library's units (tiles), z kept off the
-    // underflow (a car upside down in a low part of the map).
-    static Vec3f tiles(const Pos &p)
-    {
-        auto z = p.z.raw < 0xfe000000 ? p.z.raw : 0;
-        return { F_8_24(p.x.raw), F_8_24(p.y.raw), F_8_24(z) };
-    }
-
-    // A velocity of the game (8.24 cells per tick) in tiles per tick.
-    static Vec3f tiles(const Vec3 &v) { return { F_8_24((float)v.x), F_8_24((float)v.y), F_8_24((float)v.z) }; }
-
-    static RzVertex rz(Vec3f v) { return { v.x, v.y, v.z }; }
-
-// rzCreateWindow makes an OpenGL context of its own on the host's window and
-// leaves it current, and rzDestroy deletes it.  The host (ImGui: the map
-// chooser, the minimap) draws with its own context, so the library's is
-// made current only around its calls, and the host's is always put back
-// (otherwise, after Esc, nothing would reach the window: the chooser would
-// not show and the library's last frame would stay on the screen).
-static SDL_GLContext lib_gl;
-
-static void use_lib() { SDL_GL_MakeCurrent(gui_window(), lib_gl); }
-
-static void use_host()
+// b -> a, from the 16.16 positions (any unit: only directions are used)
+static Vec3f delta(const Pos &a, const Pos &b)
 {
-    glFlush();                              // the library's drawing first, then the host's
-    SDL_GL_MakeCurrent(gui_window(), gui_context());
+    Vec3 d = a - b;
+    return { (float)d.x, (float)d.y, (float)d.z };
 }
-#endif
+
+// A vertex of the game in the library's units (tiles), z kept off the
+// underflow (a car upside down in a low part of the map).
+static Vec3f tiles(const Pos &p)
+{
+    auto z = p.z.raw < 0xfe000000 ? p.z.raw : 0;
+    return { F_8_24(p.x.raw), F_8_24(p.y.raw), F_8_24(z) };
+}
+
+// A velocity of the game (8.24 cells per tick) in tiles per tick.
+static Vec3f tiles(const Vec3 &v) { return { F_8_24((float)v.x), F_8_24((float)v.y), F_8_24((float)v.z) }; }
+
+static RzVertex rz(Vec3f v) { return { v.x, v.y, v.z }; }
 
 static uint8_t banner_color;               // as game_frame's, which is not called here
 static int draw_distance = DRAW_DISTANCE_DEFAULT;
 static bool fog_changed = true;            // rzSetFog at the next frame
 
-void opengl_set_draw_distance(int tiles)
+void gl_set_draw_distance(int tiles)
 {
     draw_distance = tiles;
     fog_changed = true;
 }
 
-#ifdef TEREP2_GLR
 // The fog for a draw distance: it starts there (linear with the slider)
 // and is complete at end = 120 - 116 (1 - t)^k, t the slider from 0 to 1:
 // 4 at the minimum, 120 at the maximum, never more, and k such that the
@@ -155,42 +131,31 @@ static void apply_fog()
     rzSetFog(ctx, start, 120 - 116 * std::pow(1 - t, k));
     fog_changed = false;
 }
-#endif
 
-bool opengl_start()
+bool gl_start()
 {
     banner_color = 0;
     fog_changed = true;
-#ifdef TEREP2_GLR
     cam_mode = RZ_CAMERA_FOLLOW;            // the library's default
     fov_target = fov_current = FOV_SLOW;
-#endif
-#ifdef TEREP2_GLR
-    MapFiles files = map_files(".");        // real paths of the map's files
-    MapLayers layers = map_layers();        // height and tile, 256 x 256, change while playing
-    (void)files;
-    (void)layers;
 
-    auto w = gui_window();
-
-    int ok = rzCreateWindow(w, &ctx);
-    SDL_GL_SetSwapInterval(1);
-    lib_gl = SDL_GL_GetCurrentContext();
-    if(ok != RZ_OK){
-        SDL_GL_MakeCurrent(w, gui_context());
+    if (rzCreate(&ctx) != RZ_OK)
         return false;
-    }
+    // the map's layers: height and tile, 256 x 256, change while playing
     rzSetTerrainScale(ctx, 1.0f, 16.0f/255.5f);
-    rzSetHeightmap(ctx, layers.height, 256,256);
-    rzLoadTileAtlas(ctx, files.maptex.c_str());
-    rzSetTileMap(ctx, layers.tile, 256,256);
+    rzSetHeightmap(ctx, heightmap(), 256,256);
+    int32_t size;
+    const uint8_t *maptex = web_file(fname_maptex, &size);
+    rzLoadTileAtlas(ctx, maptex, size);
+    rzSetTileMap(ctx, colormap(), 256,256);
 
-    rzLoadFallbackTexture(ctx,files.textures.c_str());
+    const uint8_t *textures = web_file(fname_textures, &size);
+    if (textures)
+        rzLoadFallbackTexture(ctx, textures, size);
 
     if (rzGetError(ctx, NULL) != RZ_OK){
         //TODO actually say the error
         rzDestroy(ctx);
-        use_host();
         return false;
     }
 
@@ -200,9 +165,7 @@ bool opengl_start()
             continue;
         }
 
-        auto cpcx = files.cars[i].pcx;
-
-        loadCar(i, cpcx);
+        loadCar(i);
 
     }
 
@@ -215,17 +178,12 @@ bool opengl_start()
     
     //TODO one more error checking here
     
-    use_host();                             // only now: every rz* call above needs the library's context
-    SDL_GL_SetSwapInterval(1);              // the library's context turns vsync off for the window
     return true;
-#else
-    return false;
-#endif
 }
 
-// game_frame's text, in ImGui's font:
-// at (x, y) of the original 320 x 200 screen, in palette colour colour.
-static void draw_text(const PictureRect &at, const char *s, int x, int y, uint8_t colour)
+// game_frame's text, in the page's font: at (x, y) of the original 320 x 200
+// screen, in palette colour colour; k canvas pixels per pixel of the picture.
+static void draw_text(float k, const char *s, int x, int y, uint8_t colour)
 {
     std::string text;
     for (; *s && *s != 13; s++)
@@ -233,28 +191,24 @@ static void draw_text(const PictureRect &at, const char *s, int x, int y, uint8_
             s++;                            // a colour change: ignored
         else
             text += *s == 9 ? ' ' : *s;
-    const float px = at.k * render_scale;   // window pixels per pixel of the original
-    const uint8_t *c = host_palette(colour);
-    ImDrawList *dl = ImGui::GetForegroundDrawList();
-    dl->AddText(nullptr, 7.5f * px, ImVec2(at.x0 + x * px, at.y0 + (y - 2) * px), IM_COL32(c[0], c[1], c[2], 255),
-                text.c_str());
+    const float px = k * render_scale;      // canvas pixels per pixel of the original
+    web_text(x * px, (y - 2) * px, 7.5f * px, host_palette(colour), text.c_str());
 }
 
-static void draw_texts(const PictureRect &at)
+static void draw_texts(float k)
 {
-    draw_text(at, title_text, 10, 10, 15);
-    draw_text(at, subtitle_text, 100, 190, 15);
+    draw_text(k, title_text, 10, 10, 15);
+    draw_text(k, subtitle_text, 100, 190, 15);
     if (!extra_options.hide_banner) {
         const char *banner = draw_distance <= DRAW_DISTANCE_MIN ? "Silent Terep2"
                            : draw_distance >= DRAW_DISTANCE_MAX ? "Terep2:\nDefinitive Edition"
                                                                 : "GAMBIARRA FOREVER!";
         bool longer = draw_distance >= DRAW_DISTANCE_MAX;       // would run into the subtitle
-        draw_text(at, banner, 5, longer ? 181 : 190, (uint8_t)(banner_color >> 2));
+        draw_text(k, banner, 5, longer ? 181 : 190, (uint8_t)(banner_color >> 2));
     }
     banner_color++;
 }
 
-#ifdef TEREP2_GLR
 // Another camera (F1..F5): the internal camera's filter starts again when
 // the library's mode changes (not from F1 to F2 or back).
 static void set_camera(int c)
@@ -264,7 +218,6 @@ static void set_camera(int c)
         cam_filter.ready = false;
     cam_mode = c;
 }
-#endif
 
 // The keys game_frame would handle (keys[0] is the last key pressed); the
 // cameras' keys are the library's business.
@@ -277,21 +230,17 @@ static void game_keys()
             world.player_car[0] = 0;
         }
         world.player_car[1] = world.player_car[0];
-        #ifdef TEREP2_GLR
         auto c = carros[world.player_car[0]];
         rzSetCameraTarget(ctx, c.id, c.camera_pt);
         currTgt = c.id;
         cam_filter.ready = false;
-        #endif
         break;
     }
-    #ifdef TEREP2_GLR
     case 59: set_camera(RZ_CAMERA_INTERNAL); break;             // F1: internal
     case 60: set_camera(RZ_CAMERA_INTERNAL | CAM_UP); break;    // F2: internal, has a upright bias as the cars rolls
     case 61: set_camera(RZ_CAMERA_FOLLOW_FREEZE); break;        // F3: the chase camera stops where it is
     case 62: set_camera(RZ_CAMERA_FOLLOW); break;               // F4: chase
     case 63: set_camera(RZ_CAMERA_OVERVIEW); break;             // F5: overview
-    #endif
     case 0x1a:                              // [ and ]: gravity
         world.gravity += 50;
         break;
@@ -302,7 +251,6 @@ static void game_keys()
     keys[0] = 0;
 }
 
-#ifdef TEREP2_GLR
 // One step towards the car's current reference vertex and axes (the first
 // one after a reset starts there).
 void CamFilter::step(Car &car, uint16_t camera_pt, bool up_bias)
@@ -332,85 +280,68 @@ void CamFilter::step(Car &car, uint16_t camera_pt, bool up_bias)
     fwd = fwd.toward(f, k).normalized();
     up = up.toward(u, k).normalized();
 }
-#endif
 
 // After each physics tick (120 Hz, two or so per frame): the state of the
 // game at that tick, for what needs more than one sample per frame.  Here:
 // one step of the internal camera's filter, for the car it is on.
-void opengl_tick()
+void gl_tick()
 {
-#ifdef TEREP2_GLR
     int ci = world.player_car[0];
     if (cam_internal() && carros[ci].id >= 0)
         cam_filter.step(car_get(ci), carros[ci].camera_pt, cam_mode & CAM_UP);
-#endif
 }
 
-bool opengl_frame(int win_w, int win_h, PictureRect *where)
+void gl_frame(int height)
 {
-    #ifdef TEREP2_GLR
-        use_lib();                          // game_keys calls the library too
-    #endif
     game_keys();
     engine_sound(world.player_car[0], 0);      // what draw_view does for the sound
 
-    #ifdef TEREP2_GLR
-        if(broke_some_ice){
-            rzUpdateTerrain(ctx);
-            broke_some_ice = 0;
-        }
-        
-        updateCars();
-        updateSprites();
-        updateCamDists();
-        if (fog_changed)
-            apply_fog();
-        // the field of view (FOV_*): the chase camera's by the speed of its vertex
-        if (cam_internal()) {
-            fov_target = FOV_INTERNAL;
-        } else if (cam_mode == RZ_CAMERA_FOLLOW) {
-            int ci = world.player_car[0];
-            float speed = tiles(car_get(ci).points[carros[ci].camera_pt].vel).length();
-            float spdd = std::clamp((speed - FOV_SLOW_SPEED) / (FOV_FAST_SPEED - FOV_SLOW_SPEED), 0.0f, 1.0f);
-            fov_target = FOV_SLOW + (FOV_FAST - FOV_SLOW) * spdd * spdd;
-        } else {
-            fov_target = FOV_DEFAULT;
-        }
-        fov_current += (fov_target - fov_current) * FOV_FILTER;
-        rzSetCameraFov(ctx, fov_current);
-        if (cam_internal()) {
-            // the filtered axes (opengl_tick) of the car the camera is on
-            const CamFilter &c = cam_filter;
-            if (c.ready) {
-                RzVertex f = rz(c.fwd), u = rz(c.up);
-                rzSetCameraInternalAxes(ctx, &f, &u);
-            }
-        }
-
-        rzRender(ctx);
-        use_host();
-    #endif
+    if(broke_some_ice){
+        rzUpdateTerrain(ctx);
+        broke_some_ice = 0;
+    }
     
-    // LIB: draw the frame (cars[i].points, map_layers(), ...) on the whole window,
-    // into framebuffer 0, without swapping
-    *where = { win_w - screen_w() * ((float)win_h / screen_h()), 0, (float)win_h / screen_h() };
-    draw_texts({ 0, 0, where->k });        // from the left edge, as the lib fills the window
-    return true;
+    updateCars();
+    updateSprites();
+    updateCamDists();
+    if (fog_changed)
+        apply_fog();
+    // the field of view (FOV_*): the chase camera's by the speed of its vertex
+    if (cam_internal()) {
+        fov_target = FOV_INTERNAL;
+    } else if (cam_mode == RZ_CAMERA_FOLLOW) {
+        int ci = world.player_car[0];
+        float speed = tiles(car_get(ci).points[carros[ci].camera_pt].vel).length();
+        float spdd = std::clamp((speed - FOV_SLOW_SPEED) / (FOV_FAST_SPEED - FOV_SLOW_SPEED), 0.0f, 1.0f);
+        fov_target = FOV_SLOW + (FOV_FAST - FOV_SLOW) * spdd * spdd;
+    } else {
+        fov_target = FOV_DEFAULT;
+    }
+    fov_current += (fov_target - fov_current) * FOV_FILTER;
+    rzSetCameraFov(ctx, fov_current);
+    if (cam_internal()) {
+        // the filtered axes (gl_tick) of the car the camera is on
+        const CamFilter &c = cam_filter;
+        if (c.ready) {
+            RzVertex f = rz(c.fwd), u = rz(c.up);
+            rzSetCameraInternalAxes(ctx, &f, &u);
+        }
+    }
+
+    rzRender(ctx);
+
+    // the text from the left edge, as the library fills the canvas
+    draw_texts((float)height / screen_h());
 }
 
-void opengl_stop()
+void gl_stop()
 {
-#ifdef TEREP2_GLR
-    use_lib();
     rzDestroy(ctx);
     for(int i = 0; i < 5; i++){
         carros[i].id = -1;
     }
-    use_host();
-#endif
 }
 
-#ifdef TEREP2_GLR
 static void updateCars(){
     for(int ci = 0; ci< 5 ; ci++){
         int id = carros[ci].id;
@@ -426,7 +357,7 @@ static void updateCars(){
         for(int i =0; i< n; i++){
             ptrs[i] = rz(tiles(car.points[i].pos));
         }
-        // the reference vertex (where the camera is): filtered, see opengl_tick;
+        // the reference vertex (where the camera is): filtered, see gl_tick;
         // most cars do not use it for any polygon
         if (cam_internal() && cam_filter.ready && ci == world.player_car[0])
             ptrs[carros[ci].camera_pt] = rz(cam_filter.pos);
@@ -442,7 +373,7 @@ static void updateCars(){
     }
 }
 
-static void loadCar(int i, std::string cpcx){
+static void loadCar(int i){
     auto car = car_get(i);
     carros[i].n_points = car.points.size();
 
@@ -452,8 +383,10 @@ static void loadCar(int i, std::string cpcx){
     carros[i].camera_pt = car.ref_index;
     cam_filter.ready = false;
 
-    if(cpcx != ""){
-        rzLoadObjectTexture(ctx, idCar, cpcx.c_str());
+    int32_t size;
+    const uint8_t *pcx = car.skin.empty() ? nullptr : web_file(car_pcx_name(i), &size);
+    if(pcx){
+        rzLoadObjectTexture(ctx, idCar, pcx, size);
     }
 
     int wi = 0;
@@ -638,5 +571,3 @@ static void updateCamDists(){
 
     rzSetCameraFollow(ctx, camD, camH, 0.08f);
 }
-
-#endif

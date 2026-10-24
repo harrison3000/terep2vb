@@ -10,7 +10,6 @@
 #include <filesystem>
 #include <vector>
 #include "imgui.h"
-#include "game_renderer.hpp"
 #include "gui.hpp"
 #include "host.hpp"
 #include "launcher.hpp"
@@ -180,31 +179,6 @@ bool Launcher::frame(std::string *map)
     ImGui::SliderInt("##scale", &render_scale, 1, MAX_RENDER_SCALE, "%dx");
     ImGui::SameLine();
     ImGui::Text("%d x %d%s", screen_w(), screen_h(), render_scale == 1 ? "  (original)" : "");
-
-    ImGui::SeparatorText("Renderer");
-    ImGui::SetNextItemWidth(show_w * 0.5f);
-    if (ImGui::BeginCombo("##renderer", game_renderers[host->renderer].name)) {
-        for (int i = 0; i < game_renderer_count; i++) {
-            const GameRenderer &r = game_renderers[i];
-            ImGui::BeginDisabled(!r.available);
-            if (ImGui::Selectable(r.name, host->renderer == i))
-                host->renderer = i;
-            ImGui::EndDisabled();
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                ImGui::SetTooltip("%s%s", r.what, r.available ? "" : "\n(compiled without it: make no_gl)");
-        }
-        ImGui::EndCombo();
-    }
-    ImGui::SameLine();
-    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + show_w * 0.5f);
-    ImGui::TextDisabled("%s", game_renderers[host->renderer].what);
-    ImGui::PopTextWrapPos();
-    if (std::string_view(game_renderers[host->renderer].name) == "opengl") {
-        ImGui::SetNextItemWidth(show_w * 0.5f);
-        ImGui::SliderInt("##draw", &host->draw_distance, DRAW_DISTANCE_MIN, DRAW_DISTANCE_MAX, "%d tiles");
-        ImGui::SameLine();
-        ImGui::TextDisabled("draw distance (where the fog starts)");
-    }
 
     ImGui::SeparatorText("Misc options");
     float wrap = ImGui::GetCursorPosX() + show_w;

@@ -13,6 +13,4 @@
 - [x] Corrigir o bug do pulo que corrompe o título (o carro procura o ponto mais baixo como
       num aperto novo). Os bugs do renderizador ficam como estão.
 
-O renderizador OpenGL externo tem um TODO próprio: [TODO-lib.md](TODO-lib.md).
-
 Fora do escopo daqui: widescreen (só no renderizador novo).

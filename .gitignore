@@ -1,5 +1,5 @@
 # Build outputs
-/terep2vibed
+/terep2vb
 /terep2-headless
 *.o
 /build/
@@ -20,3 +20,5 @@ host/gl_renderer/*.a
 
 .claude
 .vscode
+# The web page's build (make web)
+/web/terep2.wasm

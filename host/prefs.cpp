@@ -2,7 +2,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <SDL.h>
-#include "game_renderer.hpp"
 #include "host.hpp"
 #include "prefs.hpp"
 
@@ -10,7 +9,7 @@ static std::string saved;              // the file's contents as last read or wr
 
 static std::string prefs_path()
 {
-    char *dir = SDL_GetPrefPath(nullptr, "terep2vibed");
+    char *dir = SDL_GetPrefPath(nullptr, "terep2vb");
     if (!dir)
         return "";
     std::string path = std::string(dir) + "prefs.txt";
@@ -30,9 +29,7 @@ static const char *on_off(bool b) { return b ? "on" : "off"; }
 static std::string prefs_text(const HostOptions &host, const std::string &map)
 {
     std::string t;
-    t += std::string("renderer: ") + game_renderers[host.renderer].name + "\n";
     t += "scale: " + std::to_string(render_scale) + "\n";
-    t += "draw-distance: " + std::to_string(host.draw_distance) + "\n";
     t += std::string("minimap: ") + on_off(host.minimap) + "\n";
     t += std::string("sound: ") + on_off(!host.no_sound) + "\n";
     for (int i = 0; i < extra_option_count; i++)
@@ -56,18 +53,10 @@ void prefs_load(HostOptions *host, std::string *map)
             continue;
         std::string key = trim(l.substr(0, colon)), value = trim(l.substr(colon + 1));
         bool on = value == "on";
-        if (key == "renderer") {
-            int r = game_renderer_find(value.c_str());
-            if (r >= 0 && game_renderers[r].available)
-                host->renderer = r;
-        } else if (key == "scale") {
+        if (key == "scale") {
             int s = atoi(value.c_str());
             if (s >= 1 && s <= MAX_RENDER_SCALE)
                 render_scale = s;
-        } else if (key == "draw-distance") {
-            int d = atoi(value.c_str());
-            if (d >= DRAW_DISTANCE_MIN && d <= DRAW_DISTANCE_MAX)
-                host->draw_distance = d;
         } else if (key == "minimap") {
             host->minimap = on;
         } else if (key == "sound") {
