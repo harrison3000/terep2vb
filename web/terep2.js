@@ -264,6 +264,11 @@ async function loadGame(dir) {
 function stop() {
     playing = false;
     wasm.web_stop();
+    if (webgl) {                        // the canvas keeps its last frame: not to be seen in the next game
+        const gl = $('gl').getContext('webgl2');
+        gl.clearColor(0, 0, 0, 1);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+    }
     if (audio)
         audio.suspend();
     $('game').hidden = true;
