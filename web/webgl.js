@@ -11,7 +11,10 @@
 //     becomes rzFetch, which finds the texel in the rows;
 //   the BGRA format: the bytes are put in RGBA order on the way;
 //   GLSL 3.30 core: the shaders become GLSL ES 3.00 (toEs);
-//   glDrawBuffer: glDrawBuffers of one.
+//   glDrawBuffer: glDrawBuffers of one;
+//   an attribute with no array (disabled): WebGL wants its constant value of
+//     the shader's type (int for ivec3 aPolygon of the wheels' faces), not
+//     OpenGL's float (0, 0, 0, 1), or it draws nothing; set with each glUseProgram.
 
 const GL_TEXTURE_BUFFER = 0x8c2a, GL_TEXTURE_2D = 0x0de1, GL_TEXTURE0 = 0x84c0, GL_BGRA = 0x80e1;
 const GL_RGBA = 0x1908, GL_RGBA32F = 0x8814, GL_R16UI = 0x8234;
@@ -304,11 +307,33 @@ export function webglImports(canvas, getMemory) {
             gl.linkProgram(p);
             if (!gl.getProgramParameter(p, gl.LINK_STATUS))
                 console.warn('webgl: program:', gl.getProgramInfoLog(p));
+            // its attributes: location and kind (0 float, 1 int, 2 unsigned)
+            const attributes = [];
+            const count = gl.getProgramParameter(p, gl.ACTIVE_ATTRIBUTES) || 0;
+            for (let i = 0; i < count; i++) {
+                const a = gl.getActiveAttrib(p, i), loc = gl.getAttribLocation(p, a.name);
+                if (loc < 0)
+                    continue;
+                const int = [gl.INT, gl.INT_VEC2, gl.INT_VEC3, gl.INT_VEC4].includes(a.type);
+                const uint = [gl.UNSIGNED_INT, gl.UNSIGNED_INT_VEC2, gl.UNSIGNED_INT_VEC3,
+                              gl.UNSIGNED_INT_VEC4].includes(a.type);
+                attributes.push([loc, int ? 1 : uint ? 2 : 0]);
+            }
+            names.get(n).attributes = attributes;
         },
         glGetProgramiv: shaderParameter((o, p) => gl.getProgramParameter(o, p), (o) => gl.getProgramInfoLog(o),
                                         GL_LINK_STATUS),
         glGetProgramInfoLog: (n, max, lenp, p) => putString(gl.getProgramInfoLog(obj(n)) || '', max, lenp, p),
-        glUseProgram: (n) => gl.useProgram(obj(n)),
+        glUseProgram(n) {
+            gl.useProgram(obj(n));
+            for (const [loc, kind] of names.get(n)?.attributes || [])
+                if (kind === 1)
+                    gl.vertexAttribI4i(loc, 0, 0, 0, 0);
+                else if (kind === 2)
+                    gl.vertexAttribI4ui(loc, 0, 0, 0, 0);
+                else
+                    gl.vertexAttrib4f(loc, 0, 0, 0, 1);
+        },
         glGetUniformLocation(n, name) {    // the same number for the same uniform, every time
             const prog = names.get(n), key = cstr(name);
             if (!prog)
