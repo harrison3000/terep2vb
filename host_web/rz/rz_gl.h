@@ -162,6 +162,7 @@ RZ_GL(glVertexAttribPointer)  void glVertexAttribPointer(GLuint index, GLint siz
 RZ_GL(glVertexAttribIPointer) void glVertexAttribIPointer(GLuint index, GLint size, GLenum type,
                                                           GLsizei stride, const void* offset);
 RZ_GL(glVertexAttribI4i)      void glVertexAttribI4i(GLuint index, GLint x, GLint y, GLint z, GLint w);
+RZ_GL(glVertexAttrib4f)       void glVertexAttrib4f(GLuint index, GLfloat x, GLfloat y, GLfloat z, GLfloat w);
 RZ_GL(glEnableVertexAttribArray) void glEnableVertexAttribArray(GLuint index);
 RZ_GL(glDrawArrays)         void glDrawArrays(GLenum mode, GLint first, GLsizei count);
 

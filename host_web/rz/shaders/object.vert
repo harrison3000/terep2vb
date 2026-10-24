@@ -4,6 +4,7 @@ layout(location = 1) in vec4 aNormal;     // idem, normal (10 bits por eixo)
 layout(location = 2) in vec2 aUV;
 layout(location = 3) in ivec3 aPolygon;   // objetos: vértice (-1: usa aPosition/aNormal),
                                           // início e tamanho do polígono em uIndices
+layout(location = 4) in vec4 aColor;      // cor sólida e, no alfa, o tipo do canto (kCorner*)
 uniform mat4 uViewProj;
 uniform mat4 uModel;                      // identidade; rodas: posição/giro de cada roda
 uniform int  uFromBuffer;                 // 1: objetos (posições em uPositions); 0: faces das rodas
@@ -17,6 +18,7 @@ uniform vec3 uShadowOffset;               // normal offset de cada cascata (mund
 uniform vec3  uLight;                     // direção para a luz (normalizada)
 uniform float uAmbient;
 flat out float vLight;
+flat out vec4 vColor;
 out vec2 vUV;
 out vec3 vShadow0, vShadow1, vShadow2;
 out vec3 vWorld;                          // para a neblina
@@ -52,6 +54,7 @@ void main() {
     vNdotL = dot(n, uLight);
     vLight = uAmbient + (1.0 - uAmbient) * max(vNdotL, 0.0);
     vUV = aUV;
+    vColor = aColor;
     vec4 world = uModel * vec4(position, 1.0);
     // Normal offset: lê o mapa de sombra num ponto empurrado pela normal, mais
     // quanto mais rasante a luz (o acne some sem descolar a sombra)

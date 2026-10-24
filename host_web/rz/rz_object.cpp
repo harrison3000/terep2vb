@@ -5,13 +5,12 @@
 // polígono (e seus UVs ou o índice de paleta), triangulam em leque, crescem os
 // buffers da CPU e realocam o VBO. A textura do objeto fica em rz_texture.cpp.
 //
-// Todo polígono é texturizado. O de cor sólida (rzAddObjectPolygon) aponta os
-// três cantos para o centro do bloquinho da sua cor na faixa de amostras da
-// paleta, no pé da textura (kSwatch*, rz_texture.cpp): UV constante, derivada
-// zero, sempre o nível 0 do mipmap. Como a posição do bloco depende do lado
-// da textura, esses UVs são calculados no envio ao VBO.
-// Os cantos dos triângulos (VBO) são estáticos: vértice do objeto, polígono e
-// UV. As posições e os índices dos polígonos ficam num uniform block do
+// O polígono de cor sólida (rzAddObjectPolygon) leva a cor no vértice, a da
+// paleta do PCX da textura em uso (solidColor), e passa pela mesma luz e
+// sombra que o texel de um texturizado; trocar a textura troca a paleta, e
+// os cantos são reenviados.
+// Os cantos dos triângulos (VBO) são estáticos: vértice do objeto, polígono,
+// UV e cor. As posições e os índices dos polígonos ficam num uniform block do
 // objeto (ObjectData, kObjectDataSize); o vertex shader busca a posição do canto e
 // calcula a normal de Newell do polígono inteiro (luz flat por polígono, mesmo
 // não plano). As linhas (rzAddObjectLine) têm posição e normal diretas.
@@ -28,6 +27,19 @@
 using namespace rz;
 
 namespace {
+
+// A cor sólida `index` para o vértice: a da paleta das cores do objeto (a do
+// PCX da sua textura, a da fallback ou, com o xadrez gerado, a do atlas, a do
+// jogo; sem nenhuma, cinza); o índice 255 é um buraco (kCornerHole).
+uint32_t solidColor(const RzContext* ctx, const Object& o, int32_t index) {
+    const uint8_t* palette = o.texture ? o.palette
+                           : ctx->hasFallbackPalette ? ctx->fallbackPalette
+                           : ctx->hasAtlasPalette ? ctx->atlasPalette : nullptr;
+    const uint32_t rgb = palette ? (uint32_t(palette[index * 3]) << 16) | (uint32_t(palette[index * 3 + 1]) << 8)
+                                   | uint32_t(palette[index * 3 + 2])
+                                 : uint32_t(index) * 0x010101u;
+    return rgbaTexel(rgb, index == kTransparentIndex ? kCornerHole : kCornerSolid);
+}
 
 bool validId(const RzContext* ctx, int32_t id) {
     return ctx && id >= 0 && id < int32_t(ctx->objects.size()) && ctx->objects[id].alive;
@@ -72,19 +84,18 @@ void loadPositions(const RzContext* ctx, Object& o, const RzVertex* vertices) {
 }
 
 // Linhas (rzAddObjectLine): prisma de seção quadrada (lado = grossura) em
-// volta do segmento a-b, 4 lados + 2 tampas, cor sólida da paleta (UV do
-// bloquinho) com a luz flat de cada face. A seção é orientada pelo "cima" do
+// volta do segmento a-b, 4 lados + 2 tampas, cor sólida da paleta com a luz
+// flat de cada face. A seção é orientada pelo "cima" do
 // mundo (não gira junto com o objeto em volta da linha; é fina, não aparece).
 // Faces no sentido do legado (horário visto de fora), para o culling.
-void emitLines(const Object& o, int32_t side, ObjectVertex*& v) {
+void emitLines(const RzContext* ctx, const Object& o, ObjectVertex*& v) {
     for (const ObjectLine& l : o.lines) {
         const Vec3 pa = o.world[l.a], pb = o.world[l.b];
-        float su, sv;
-        swatchUV(l.palette, side, &su, &sv);
+        const uint32_t color = solidColor(ctx, o, l.palette);
         Vec3 d = pb - pa;
         const float len2 = dot(d, d);
         if (!(len2 > 0.0f)) {                                  // ponta com ponta: nada visível
-            for (int32_t k = 0; k < kLineVertices; ++k) *v++ = { pa.x, pa.y, pa.z, 0, su, sv, -1, 0, 0 };
+            for (int32_t k = 0; k < kLineVertices; ++k) *v++ = { pa.x, pa.y, pa.z, 0, 0.0f, 0.0f, -1, 0, 0, color };
             continue;
         }
         const float invLen = 1.0f / sqrtf(len2);
@@ -105,7 +116,7 @@ void emitLines(const Object& o, int32_t side, ObjectVertex*& v) {
             if (dot(cross(p1 - p0, p2 - p0), n) > 0.0f) { const Vec3 t = p1; p1 = p3; p3 = t; }
             const uint32_t normal = packNormal(n);
             const Vec3 q[6] = { p0, p1, p2, p0, p2, p3 };
-            for (const Vec3& p : q) *v++ = { p.x, p.y, p.z, normal, su, sv, -1, 0, 0 };
+            for (const Vec3& p : q) *v++ = { p.x, p.y, p.z, normal, 0.0f, 0.0f, -1, 0, 0, color };
         };
         for (int32_t k = 0; k < 4; ++k) {
             const int32_t k1 = (k + 1) & 3;
@@ -132,22 +143,19 @@ void resizeObjectBuffers(Object& o) {
 
 // Monta os cantos dos triângulos (e das linhas) e reenvia o vertex buffer
 // inteiro (que já tem o tamanho certo: é realocado em resizeObjectBuffers).
-// side: lado da textura em uso, para o UV das cores sólidas.
-void uploadObject(Object& o, int32_t side) {
+void uploadObject(const RzContext* ctx, Object& o) {
     ObjectVertex* v = o.staging.data();
     for (const ObjectTriangle& tri : o.triangles) {
         const int32_t pal   = o.polygonPalette[tri.polygon];
         const int32_t first = o.polygonStart[tri.polygon], count = o.polygonLength[tri.polygon];
-        float su = 0.0f, sv = 0.0f;
-        if (pal >= 0) swatchUV(pal, side, &su, &sv);
+        const uint32_t color = pal >= 0 ? solidColor(ctx, o, pal) : rgbaTexel(0, kCornerTextured);
         const int32_t corners[3] = { tri.a, tri.b, tri.c };
         for (int32_t corner : corners) {
             const int32_t vertex = o.indices[corner];
-            if (pal >= 0) *v++ = { 0.0f, 0.0f, 0.0f, 0, su, sv, vertex, first, count };
-            else          *v++ = { 0.0f, 0.0f, 0.0f, 0, o.uvs[corner * 2], o.uvs[corner * 2 + 1], vertex, first, count };
+            *v++ = { 0.0f, 0.0f, 0.0f, 0, o.uvs[corner * 2], o.uvs[corner * 2 + 1], vertex, first, count, color };
         }
     }
-    emitLines(o, side, v);
+    emitLines(ctx, o, v);
     glBindBuffer(GL_ARRAY_BUFFER, o.vbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, GLsizeiptr(o.staging.size() * sizeof(ObjectVertex)),
                     o.staging.data());
@@ -155,11 +163,11 @@ void uploadObject(Object& o, int32_t side) {
 
 // Linhas: dependem das posições, então são refeitas e reenviadas (só a parte
 // delas, no fim do VBO) a cada update
-void uploadLines(Object& o, int32_t side) {
+void uploadLines(const RzContext* ctx, Object& o) {
     if (o.lines.empty()) return;
     const size_t first = o.triangles.size() * 3;
     ObjectVertex* v = o.staging.data() + first;
-    emitLines(o, side, v);
+    emitLines(ctx, o, v);
     glBindBuffer(GL_ARRAY_BUFFER, o.vbo);
     glBufferSubData(GL_ARRAY_BUFFER, GLintptr(first * sizeof(ObjectVertex)),
                     GLsizeiptr((o.staging.size() - first) * sizeof(ObjectVertex)), o.staging.data() + first);
@@ -187,6 +195,9 @@ void setObjectBufferLayout() {
     glEnableVertexAttribArray(2);
     glVertexAttribIPointer(3, 3, GL_INT, stride, reinterpret_cast<void*>(offsetof(ObjectVertex, vertex)));
     glEnableVertexAttribArray(3);
+    glVertexAttribPointer(4, 4, GL_UNSIGNED_BYTE, GL_TRUE, stride,
+                          reinterpret_cast<void*>(offsetof(ObjectVertex, color)));
+    glEnableVertexAttribArray(4);
 }
 
 // Liga o bloco do objeto (posições e índices) para os shaders
@@ -270,16 +281,14 @@ void prepareObjects(RzContext* ctx) {
     for (Object& o : ctx->objects) {
         if (o.alive && objectInRange(ctx, o)) prepareWheels(ctx, o);
         if (!drawable(o) || !objectInRange(ctx, o)) continue;
-        const int32_t side = o.texture ? o.textureSize : ctx->fallbackSize;
-        const bool rebuild = o.gpuDirty || o.uploadedSide != side;   // textura trocada: UVs das cores mudam
+        const bool rebuild = o.gpuDirty;
         if (rebuild) {
-            uploadObject(o, side);
+            uploadObject(ctx, o);
             o.gpuDirty = false;
-            o.uploadedSide = side;
         }
         if (o.positionsDirty) {
             uploadPositions(o);
-            if (!rebuild) uploadLines(o, side);
+            if (!rebuild) uploadLines(ctx, o);
             o.positionsDirty = false;
         }
     }
@@ -337,6 +346,10 @@ void drawObjects(RzContext* ctx, const Mat4& viewProj) {
         glDrawArrays(GL_TRIANGLES, 0, o.drawVertexCount());
     }
     if (programBound) glUniform1i(ctx->objectProgram.fromBuffer, 0);   // faces das rodas: posição direta
+}
+
+void markObjectsDirty(RzContext* ctx) {
+    for (Object& o : ctx->objects) o.gpuDirty = o.gpuDirty || o.alive;
 }
 
 void destroyAllObjects(RzContext* ctx) {

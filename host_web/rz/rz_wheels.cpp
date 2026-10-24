@@ -375,9 +375,11 @@ void drawWheelFaces(RzContext* ctx, const Mat4& viewProj) {
             setMatrix(prog.viewProj, viewProj);
             bindShadowMaps(ctx, prog.shadow);           // deixa a unidade 0 ativa
             bindFog(ctx, prog.fog);
-            // aPolygon (3) não tem array aqui: o valor fixo tem que ser do tipo
-            // do shader (ivec3), senão o WebGL não desenha; uFromBuffer é 0
+            // aPolygon (3) e aColor (4) não têm array aqui: o valor fixo de
+            // aPolygon tem que ser do tipo do shader (ivec3), senão o WebGL não
+            // desenha (uFromBuffer é 0), e o de aColor diz "texturizado"
             glVertexAttribI4i(3, -1, 0, 0, 0);
+            glVertexAttrib4f(4, 0.0f, 0.0f, 0.0f, float(kCornerTextured));
             glDisable(GL_CULL_FACE);
             bound = true;
         }

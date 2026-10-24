@@ -196,8 +196,7 @@ int32_t rzAddObjectPolygon(RzContext* ctx, int32_t id,
    ambos na escala da LARGURA da textura (ver rzLoadObjectTexture): v = 1 é a
    linha W, não a altura da imagem. (0, 0) é o canto superior esquerdo. Fora
    de [0, 1], repete a borda. UV não finito: RZ_ERR_INVALID_ARG. A cor do
-   polígono é a textura vezes a luz flat. Os UVs devem ficar fora das últimas
-   16 linhas (faixa de paleta). */
+   polígono é a textura vezes a luz flat. */
 int32_t rzAddObjectTexturedPolygon(RzContext* ctx, int32_t id,
                                    const RzTexVertex* corners, int32_t count);
 
@@ -264,14 +263,13 @@ int32_t rzUpdateObjectWheels(RzContext* ctx, int32_t id, float steer);
    completada embaixo (repetindo a última linha).
    Pixels com o índice 255 da paleta são totalmente transparentes (inclusive
    a cor sólida 255 de rzAddObjectPolygon).
-   As últimas 16 linhas da textura são reservadas: viram 256 bloquinhos 4x4,
-   um por cor da paleta do PCX, para os polígonos de cor sólida
-   (rzAddObjectPolygon). O conteúdo da imagem nessas linhas é sobrescrito.
+   A paleta do PCX dá as cores dos polígonos de cor sólida (rzAddObjectPolygon)
+   e das linhas do objeto.
    pcx, size: o arquivo inteiro, na memória, como em rzLoadTileAtlas.
    Sem textura carregada, ou se esta função falhar (RZ_ERR_FORMAT,
-   RZ_ERR_SIZE para largura < 256), o objeto usa a textura fallback (xadrez
-   magenta; os polígonos de cor sólida também saem no xadrez). Chamar de novo
-   troca a textura. */
+   RZ_ERR_SIZE para largura < 256), o objeto usa a textura fallback e a
+   paleta dela (a do xadrez magenta gerado: a do atlas). Chamar de novo troca
+   a textura. */
 int32_t rzLoadObjectTexture(RzContext* ctx, int32_t id, const uint8_t* pcx, int32_t size);
 
 /* Troca a textura fallback (a dos objetos sem textura ou cuja carga falhou),

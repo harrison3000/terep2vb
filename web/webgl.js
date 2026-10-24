@@ -168,6 +168,7 @@ export function webglImports(canvas, getMemory) {
             gl.vertexAttribPointer(i, size, type, !!normalized, stride, offset),
         glVertexAttribIPointer: (i, size, type, stride, offset) => gl.vertexAttribIPointer(i, size, type, stride, offset),
         glVertexAttribI4i: (i, x, y, z, w) => gl.vertexAttribI4i(i, x, y, z, w),
+        glVertexAttrib4f: (i, x, y, z, w) => gl.vertexAttrib4f(i, x, y, z, w),
         glEnableVertexAttribArray: (i) => gl.enableVertexAttribArray(i),
         glDrawArrays: (mode, first, count) => gl.drawArrays(mode, first, count),
     };

@@ -8,11 +8,8 @@
 // cortada em W linhas ou completada embaixo repetindo a última linha. Assim
 // v = 1 corresponde a W pixels, a mesma escala de u.
 //
-// Gambiarra das cores sólidas: as últimas kSwatchRows linhas (que deveriam ser
-// padding) recebem 256 bloquinhos kSwatchBlock x kSwatchBlock, um por cor da
-// paleta do PCX; os polígonos de rzAddObjectPolygon amostram o centro do
-// bloco da sua cor. O que a imagem tiver nessas linhas é sobrescrito. O xadrez
-// fallback gerado aqui não tem paleta: a faixa continua xadrez.
+// A paleta do PCX fica com a textura: as cores sólidas (rzAddObjectPolygon)
+// saem dela (rz_object.cpp). O xadrez fallback gerado aqui não tem paleta.
 //
 // Mipmaps gerados na CPU (média 2x2), como no atlas do chão; filtro fixo, o
 // mesmo do chão (nearest no nível, linear entre níveis).
@@ -45,26 +42,9 @@ bool validId(const RzContext* ctx, int32_t id) {
 void releaseTexture(Object& o) {
     if (o.texture) glDeleteTextures(1, &o.texture);
     o.texture = 0;
-    o.textureSize = 0;
-}
-
-// Bloco da cor i: coluna i % (side / bloco), linha de blocos i / (side / bloco)
-void swatchOrigin(int32_t i, int32_t side, int32_t* x, int32_t* y) {
-    const int32_t perRow = side / kSwatchBlock;
-    *x = (i % perRow) * kSwatchBlock;
-    *y = side - kSwatchRows + (i / perRow) * kSwatchBlock;
 }
 
 } // namespace
-
-// Centro do bloco da cor (texel kSwatchBlock/2 dentro dele), em UV.
-void swatchUV(int32_t paletteIndex, int32_t side, float* u, float* v) {
-    int32_t x, y;
-    swatchOrigin(paletteIndex, side, &x, &y);
-    const float half = float(kSwatchBlock) * 0.5f;
-    *u = (float(x) + half) / float(side);
-    *v = (float(y) + half) / float(side);
-}
 
 int32_t mipLevels(int32_t side) {
     int32_t levels = 1;
@@ -117,12 +97,11 @@ GLuint uploadSquareTexture(const uint32_t* rgba, int32_t side) {
     return texture;
 }
 
-// PCX -> textura quadrada (regras do topo do arquivo). Em caso de erro, nada é
-// criado e *outTexture fica 0.
+// PCX -> textura quadrada (regras do topo do arquivo) e a paleta dele
+// (768 bytes RGB). Em caso de erro, nada é criado e *outTexture fica 0.
 static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint* outTexture,
-                                        int32_t* outSide) {
+                                        uint8_t* outPalette) {
     *outTexture = 0;
-    *outSide = 0;
     PcxImage img;
     const int32_t err = loadPcx(pcx, size, img);
     if (err != RZ_OK) return err;
@@ -149,20 +128,9 @@ static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint
         for (int32_t x = 0; x < side; ++x) dst[x] = pal[src[x]];
     }
 
-    // Faixa de amostras da paleta, no pé da textura
-    for (int32_t i = 0; i < 256; ++i) {
-        int32_t bx, by;
-        swatchOrigin(i, side, &bx, &by);
-        for (int32_t y = 0; y < kSwatchBlock; ++y) {
-            for (int32_t x = 0; x < kSwatchBlock; ++x) {
-                texels[size_t(by + y) * size_t(side) + size_t(bx + x)] = pal[i];
-            }
-        }
-    }
-
     *outTexture = uploadSquareTexture(texels.data(), side);
     if (!*outTexture) return RZ_ERR_GL;
-    *outSide = side;
+    std::memcpy(outPalette, img.palette, 768);
     return RZ_OK;
 }
 
@@ -179,8 +147,9 @@ bool createFallbackTexture(RzContext* ctx) {
     const GLuint texture = uploadSquareTexture(texels.data(), kFallbackSize);
     if (!texture) return false;
     if (ctx->fallbackTex) glDeleteTextures(1, &ctx->fallbackTex);
-    ctx->fallbackTex  = texture;
-    ctx->fallbackSize = kFallbackSize;
+    ctx->fallbackTex = texture;
+    ctx->hasFallbackPalette = false;
+    markObjectsDirty(ctx);
     return true;
 }
 
@@ -194,7 +163,8 @@ int32_t rzLoadObjectTexture(RzContext* ctx, int32_t id, const uint8_t* pcx, int3
     if (!validId(ctx, id) || !pcx) return recordError(ctx, "rzLoadObjectTexture", RZ_ERR_INVALID_ARG);
     Object& o = ctx->objects[id];
     releaseTexture(o);                       // em caso de erro: fallback
-    return recordError(ctx, "rzLoadObjectTexture", loadSquareTextureFromPcx(pcx, size, &o.texture, &o.textureSize));
+    o.gpuDirty = true;                       // as cores sólidas: a paleta nova (ou a da fallback)
+    return recordError(ctx, "rzLoadObjectTexture", loadSquareTextureFromPcx(pcx, size, &o.texture, o.palette));
 }
 
 int32_t rzLoadFallbackTexture(RzContext* ctx, const uint8_t* pcx, int32_t size) {
@@ -202,12 +172,14 @@ int32_t rzLoadFallbackTexture(RzContext* ctx, const uint8_t* pcx, int32_t size) 
     if (!pcx) return recordError(ctx, "rzLoadFallbackTexture", createFallbackTexture(ctx) ? RZ_OK : RZ_ERR_GL);   // volta ao xadrez
 
     GLuint texture;
-    int32_t side;
-    const int32_t err = loadSquareTextureFromPcx(pcx, size, &texture, &side);
+    uint8_t palette[768];
+    const int32_t err = loadSquareTextureFromPcx(pcx, size, &texture, palette);
     if (err != RZ_OK) return recordError(ctx, "rzLoadFallbackTexture", err);   // a fallback atual continua
     glDeleteTextures(1, &ctx->fallbackTex);
-    ctx->fallbackTex  = texture;
-    ctx->fallbackSize = side;
+    ctx->fallbackTex = texture;
+    std::memcpy(ctx->fallbackPalette, palette, sizeof(palette));
+    ctx->hasFallbackPalette = true;
+    markObjectsDirty(ctx);                   // as cores sólidas de quem usa a fallback
     return RZ_OK;
 }
 

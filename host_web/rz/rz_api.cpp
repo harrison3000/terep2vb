@@ -165,6 +165,7 @@ int32_t rzLoadTileAtlas(RzContext* ctx, const uint8_t* pcx, int32_t size) {
     setSpritePalette(ctx, paletteRGB);                // sprites: paleta do jogo
     std::memcpy(ctx->atlasPalette, paletteRGB, sizeof(ctx->atlasPalette));
     ctx->hasAtlasPalette = true;
+    markObjectsDirty(ctx);                            // as cores sólidas sem paleta própria
     updateBackgroundColor(ctx);                       // fundo: índice nesta paleta
     return RZ_OK;
 }

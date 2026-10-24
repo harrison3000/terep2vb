@@ -4,6 +4,7 @@ precision highp int;
 precision highp sampler2D;
 precision highp sampler2DShadow;
 flat in float vLight;
+flat in vec4 vColor;                      // cor sólida; alfa: 0 texturizado, 0,5 buraco, 1 cor sólida
 in vec2 vUV;
 in vec3 vShadow0, vShadow1, vShadow2;
 in vec3 vWorld;
@@ -68,9 +69,16 @@ void main() {
         fragColor = vec4(uFogColor, 0.0);
         return;
     }
-    vec4 tex = textureGrad(uTexture, vUV, dUVx, dUVy);       // nearest no nível, linear entre níveis
-    if (tex.a < 0.5) discard;                                // índice 255 do PCX: transparente
-    vec3 texel = tex.rgb;
+    vec3 texel;
+    if (vColor.a < 0.25) {                                   // texturizado
+        vec4 tex = textureGrad(uTexture, vUV, dUVx, dUVy);   // nearest no nível, linear entre níveis
+        if (tex.a < 0.5) discard;                            // índice 255 do PCX: transparente
+        texel = tex.rgb;
+    } else if (vColor.a < 0.75) {
+        discard;                                             // a cor sólida 255: transparente
+    } else {
+        texel = vColor.rgb;                                  // cor sólida: a mesma luz do texel
+    }
     float lit = shadowTerm() * smoothstep(0.0, uShadowTerminator, vNdotL);
     vec3 color = texel * mix(min(uShadowLight, vLight), vLight, lit);
     fragColor = vec4(mix(color, uFogColor, fog), 0.0);

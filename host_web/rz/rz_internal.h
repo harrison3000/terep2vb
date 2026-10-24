@@ -250,18 +250,17 @@ static_assert(sizeof(GpuVertex) == 24);
 struct ObjectVertex {
     float    x, y, z;          // só linhas
     uint32_t normal;           // só linhas (packNormal)
-    float    u, v;
+    float    u, v;             // só polígonos texturizados
     int32_t  vertex;           // índice do vértice do objeto, ou -1 (linha)
     int32_t  polygonStart, polygonLength;
+    uint32_t color;            // R, G, B em bytes e o tipo do canto no alfa (kCorner*)
 };
-static_assert(sizeof(ObjectVertex) == 36);
+static_assert(sizeof(ObjectVertex) == 40);
 
-// Faixa de amostras da paleta no pé de toda textura de objeto: 256 blocos de
-// kSwatchBlock x kSwatchBlock, um por cor, da esquerda para a direita e de cima
-// para baixo, nas últimas kSwatchRows linhas (side/4 blocos por linha de blocos;
-// com side >= 256, cabem em 4 linhas de blocos).
-constexpr int32_t kSwatchBlock = 4;
-constexpr int32_t kSwatchRows  = 16;
+// O tipo do canto, no alfa de ObjectVertex::color (object.frag): texturizado
+// (amostra a textura no UV), de cor sólida (a cor do vértice: rzAddObjectPolygon
+// e linhas) ou buraco (a cor sólida 255, transparente: não desenha, mas faz sombra)
+constexpr uint32_t kCornerTextured = 0, kCornerHole = 128, kCornerSolid = 255;
 
 // Vértice do terreno: um por canto de triângulo (malha não indexada, porque a
 // cor flat e o bloco são do triângulo/quad, não do ponto da grade).
@@ -305,7 +304,6 @@ struct Object {
     bool      positioned = false;   // já recebeu rzUpdateObjectVertices
     bool      gpuDirty   = false;   // cantos/VBO desatualizados (polígonos, linhas): reenviar no próximo frame
     bool      positionsDirty = false;   // posições novas (rzUpdateObjectVertices): reenviar ao bloco
-    int32_t   uploadedSide = 0;     // lado da textura usado no último envio (UV das cores)
     Vec3      center = { 0.0f, 0.0f, 0.0f };   // esfera envolvente (refeita em cada update)
     float     radius = 0.0f;
 
@@ -361,7 +359,7 @@ struct Object {
     int32_t   wheelCapVerts = 0;        // vértices em uso no VBO das faces
 
     GLuint    texture = 0;          // 0: usa a textura fallback do contexto
-    int32_t   textureSize = 0;      // lado da textura (potência de 2)
+    uint8_t   palette[768];         // RGB da paleta do PCX da textura (as cores sólidas)
 
     int32_t vertexCount() const   { return int32_t(world.size()); }
     int32_t triangleCount() const { return int32_t(triangles.size()); }
@@ -545,7 +543,8 @@ struct RzContext {
     // Textura dos objetos sem textura própria (ou cuja carga falhou): xadrez
     // gerado ou PCX de rzLoadFallbackTexture
     rz::GLuint fallbackTex = 0;
-    int32_t    fallbackSize = 0;
+    bool       hasFallbackPalette = false;   // false: o xadrez gerado (cores sólidas: a paleta do atlas)
+    uint8_t    fallbackPalette[768];         // RGB da paleta do PCX da fallback
 
     // Câmera
     float terrainRadius = 0.0f;   // R: raio da esfera envolvente do terreno
@@ -741,7 +740,6 @@ GLuint uploadSquareTexture(const uint32_t* rgba, int32_t side);
 void   applyFilter2D(GLuint texture, int32_t side);
 bool   createFallbackTexture(RzContext* ctx);
 int32_t mipLevels(int32_t side);   // log2(side) + 1
-void   swatchUV(int32_t paletteIndex, int32_t side, float* u, float* v);   // centro do bloco
 
 // rz_object.cpp
 bool objectInRange(const RzContext* ctx, const Object& o);   // não está todo além da neblina
@@ -750,5 +748,6 @@ void prepareObjects(RzContext* ctx);          // reenvia os VBOs alterados
 void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId, int32_t skipId);
 void drawObjects(RzContext* ctx, const Mat4& viewProj);
 void destroyAllObjects(RzContext* ctx);
+void markObjectsDirty(RzContext* ctx);        // a paleta das cores sólidas mudou: cantos a reenviar
 
 } // namespace rz

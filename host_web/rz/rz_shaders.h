@@ -24,9 +24,8 @@ inline constexpr unsigned char kTerrainFragmentShader[] = {
 , 0 };
 
 // Objetos: posição no mundo, normal de fora do polígono (a mesma em todos os
-// triângulos dele, mesmo não plano) e UV. Luz flat como no terreno. Todo
-// polígono é texturizado (os de cor sólida amostram um bloquinho da faixa de
-// paleta).
+// triângulos dele, mesmo não plano), UV e cor. Luz flat como no terreno, na
+// textura ou na cor sólida do vértice.
 inline constexpr unsigned char kObjectVertexShader[] = {
 #embed "shaders/object.vert"
 , 0 };
