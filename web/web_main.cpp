@@ -41,7 +41,15 @@ std::vector<File> files;        // the map's, by their names (any case)
 bool running = false;
 bool opengl = false;            // this game is drawn by the OpenGL renderer
 int view_w = 1, view_h = 1;     // the canvas's size (OpenGL renderer), web_view
-double tick_ms = 0, frame_ms = 0;  // time not yet spent on ticks / frames
+double tick_ms = 0, frame_ms = 0;  // time not yet spent on ticks / frames (a little below 0: early)
+
+// The page's animation frames come about every 1/60 s, but not exactly: a
+// tick or a frame is done that much early (and the next one that much later)
+// rather than wait for the next animation frame, or the same picture would
+// show twice and then the game would jump, and the ticks of a frame would go
+// 1, 3 instead of 2, 2.
+constexpr double TICK_MS = 1000.0 / 120, FRAME_MS = 1000.0 / 60;
+constexpr double TICK_EARLY_MS = 1, FRAME_EARLY_MS = 2;
 std::vector<uint32_t> picture;  // the last frame, RGBA
 
 opl3_chip chip;
@@ -239,7 +247,7 @@ EXPORT("web_advance") const uint32_t *web_advance(double ms)
         ms = 0;                         // the first animation frame can come stamped before the start
     if (ms > 250)
         ms = 250;                       // after a stall (a hidden tab): do not try to catch up
-    for (tick_ms += ms; tick_ms >= 1000.0 / 120; tick_ms -= 1000.0 / 120) {
+    for (tick_ms += ms; tick_ms >= TICK_MS - TICK_EARLY_MS; tick_ms -= TICK_MS) {
         physics_tick();
         if (opengl)
             opengl_tick();
@@ -253,11 +261,11 @@ EXPORT("web_advance") const uint32_t *web_advance(double ms)
         OPL3_GenerateStream(&chip, audio.data(), (uint32_t)n);
     }
     frame_ms += ms;
-    if (frame_ms < 1000.0 / 60)
+    if (frame_ms < FRAME_MS - FRAME_EARLY_MS)
         return nullptr;
-    frame_ms -= 1000.0 / 60;
-    if (frame_ms > 1000.0 / 60)
-        frame_ms = 0;
+    frame_ms -= FRAME_MS;
+    if (frame_ms > FRAME_MS)
+        frame_ms = 0;                   // more than a frame behind: not to be made up
     if (opengl) {
         texts.clear();
         PictureRect where;
