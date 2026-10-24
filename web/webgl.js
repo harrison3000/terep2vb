@@ -66,11 +66,6 @@ export function webglImports(canvas, getMemory) {
             gl ??= canvas.getContext('webgl2', { alpha: false, depth: true, stencil: false, antialias: false });
             return gl ? 1 : 0;
         },
-        canvasSize(wp, hp) {
-            const m = i32();
-            m[wp >> 2] = gl.drawingBufferWidth;
-            m[hp >> 2] = gl.drawingBufferHeight;
-        },
 
         glGetError: () => gl.getError(),
         glGetIntegerv: (name, p) => { i32()[p >> 2] = +gl.getParameter(name); },

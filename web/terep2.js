@@ -235,7 +235,8 @@ function stop() {
 const picture = document.createElement('canvas');
 
 // The OpenGL renderer's canvas and the text's over it: the whole window, in
-// device pixels.
+// device pixels.  When a game starts and when the window's size (or its
+// pixel ratio, another screen or a zoom) changes.
 function sizeCanvases() {
     const w = Math.max(1, Math.floor(innerWidth * devicePixelRatio));
     const h = Math.max(1, Math.floor(innerHeight * devicePixelRatio));
@@ -244,8 +245,10 @@ function sizeCanvases() {
             c.width = w;
             c.height = h;
         }
-    wasm.web_canvas_height(h);
+    wasm.web_canvas_size(w, h);
 }
+
+addEventListener('resize', () => { if (playing && webgl) sizeCanvases(); });
 
 // The OpenGL renderer's text (game_frame's), over its picture.
 function drawTexts() {
@@ -265,8 +268,6 @@ function drawTexts() {
 function frame(now) {
     if (!playing)
         return;
-    if (webgl)
-        sizeCanvases();
     const drawn = wasm.web_advance(now - last);
     last = now;
     playSamples();

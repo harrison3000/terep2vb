@@ -38,7 +38,7 @@ std::vector<File> files;        // the map's, by their names (any case)
 
 bool running = false;
 bool opengl = false;            // this game is drawn by the OpenGL renderer
-int canvas_height = 1;          // the OpenGL renderer's canvas, in pixels (web_canvas_height)
+int canvas_w = 1, canvas_h = 1; // the OpenGL renderer's canvas, in pixels (web_canvas_size)
 double tick_ms = 0, frame_ms = 0;  // time not yet spent on ticks / frames (a little below 0: early)
 
 // The page's animation frames come about every 1/60 s, but not exactly: a
@@ -160,7 +160,7 @@ EXPORT("web_audio_frames") int web_audio_frames() { return (int)(audio.size() / 
 
 // A game on the files added, at a render scale (1..MAX_RENDER_SCALE) and with
 // the extra options (fix_ice_bug, hide_banner), drawn by the game itself or,
-// with gl, by the OpenGL renderer (web_canvas_height first).  Returns false if the
+// with gl, by the OpenGL renderer (web_canvas_size first).  Returns false if the
 // map cannot be played (no car1.dat...) or the renderer cannot start.
 EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bool gl)
 {
@@ -175,7 +175,7 @@ EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bo
         return false;
     opengl = gl;
     texts.clear();
-    if (opengl && !gl_start()) {
+    if (opengl && !gl_start(canvas_w, canvas_h)) {
         host_free_game();
         return false;
     }
@@ -189,11 +189,14 @@ EXPORT("web_stop") void web_stop()
     stop_game();
 }
 
-// The canvas's height in pixels, for the OpenGL renderer's text (the
-// library asks webgl.js for the size itself).
-EXPORT("web_canvas_height") void web_canvas_height(int h)
+// The OpenGL renderer's canvas, in pixels: before web_start, and whenever
+// its size changes.
+EXPORT("web_canvas_size") void web_canvas_size(int w, int h)
 {
-    canvas_height = h < 1 ? 1 : h;
+    canvas_w = w < 1 ? 1 : w;
+    canvas_h = h < 1 ? 1 : h;
+    if (running && opengl)
+        gl_resize(canvas_w, canvas_h);
 }
 
 // The OpenGL renderer's draw distance (DRAW_DISTANCE_MIN..MAX tiles): any time.
@@ -242,7 +245,7 @@ EXPORT("web_advance") bool web_advance(double ms)
         frame_ms = 0;                   // more than a frame behind: not to be made up
     if (opengl) {
         texts.clear();
-        gl_frame(canvas_height);
+        gl_frame();
         return true;
     }
     game_frame();                       // its Esc never comes: the page keeps it

@@ -12,8 +12,10 @@ void web_text(float x, float y, float size, const uint8_t *rgb, const char *text
 
 // gl_renderer.cpp: the OpenGL renderer, on the page's canvas
 constexpr int DRAW_DISTANCE_MIN = 1, DRAW_DISTANCE_DEFAULT = 30, DRAW_DISTANCE_MAX = 110;  // tiles
-bool gl_start();                        // after game_init; false: cannot (no WebGL 2, the map's files)
+bool gl_start(int width, int height);   // after game_init, the canvas's size in pixels; false: cannot
+                                        // (no WebGL 2, the map's files)
+void gl_resize(int width, int height);  // the canvas's size changed
 void gl_tick();                         // after each physics tick
-void gl_frame(int height);              // a frame; height: the canvas's, in pixels (the text)
+void gl_frame();                        // a frame
 void gl_stop();                         // before the game's memory is freed
 void gl_set_draw_distance(int tiles);   // where the fog starts: DRAW_DISTANCE_MIN..MAX; any time

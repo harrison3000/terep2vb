@@ -71,11 +71,15 @@ typedef char RzAssertSpriteSize[sizeof(RzSprite) == 24 ? 1 : -1];
 #define RZ_ERR_GL           4   /* WebGL 2 indisponível, ou falha de shader */
 #define RZ_ERR_FORMAT       6   /* arquivo em formato não suportado ou corrompido */
 
-/* Cria o contexto no canvas da página (webgl.js: o seu WebGL 2), do tamanho
-   do drawing buffer dele. rzRender desenha no framebuffer do canvas, que o
-   navegador mostra no fim do quadro de animação; a resolução acompanha o
-   tamanho do canvas (lido a cada rzRender). Um contexto por vez. */
-int32_t rzCreate(RzContext** outCtx);
+/* Cria o contexto no canvas da página (webgl.js: o seu WebGL 2); width e
+   height: o tamanho do drawing buffer dele. rzRender desenha no framebuffer
+   do canvas, que o navegador mostra no fim do quadro de animação. Um
+   contexto por vez. */
+int32_t rzCreate(int32_t width, int32_t height, RzContext** outCtx);
+
+/* O canvas mudou de tamanho (o host avisa só quando muda): vale a partir do
+   próximo rzRender. */
+int32_t rzSetSize(RzContext* ctx, int32_t width, int32_t height);
 
 void rzDestroy(RzContext* ctx);
 

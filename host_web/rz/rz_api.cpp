@@ -39,10 +39,9 @@ void updateBackgroundColor(RzContext* ctx) {
     ctx->backgroundB = float(rgb[2]) * inv255;
 }
 
-// O tamanho do canvas, se ele tem um que serve
-bool canvasDrawableSize(int32_t* width, int32_t* height) {
-    canvasSize(width, height);
-    return *width >= 1 && *height >= 1 && *width <= kMaxWindowSize && *height <= kMaxWindowSize;
+// Um tamanho de canvas que serve
+bool validSize(int32_t width, int32_t height) {
+    return width >= 1 && height >= 1 && width <= kMaxWindowSize && height <= kMaxWindowSize;
 }
 
 // Erro da última rzCreate que falhou (não há contexto onde guardar);
@@ -84,12 +83,11 @@ int32_t rzGetError(RzContext* ctx, const char** outFunction) {
     return err;
 }
 
-int32_t rzCreate(RzContext** outCtx) {
+int32_t rzCreate(int32_t width, int32_t height, RzContext** outCtx) {
     if (!outCtx) return recordCreateError("rzCreate", RZ_ERR_INVALID_ARG);
     *outCtx = nullptr;
+    if (!validSize(width, height)) return recordCreateError("rzCreate", RZ_ERR_SIZE);
     if (!canvasContext()) return recordCreateError("rzCreate", RZ_ERR_GL);
-    int32_t width, height;
-    if (!canvasDrawableSize(&width, &height)) return recordCreateError("rzCreate", RZ_ERR_SIZE);
 
     RzContext* ctx = new RzContext;     // padrões nos inicializadores dos membros
     setSize(ctx, width, height);
@@ -278,12 +276,15 @@ int32_t rzSetCameraFollow(RzContext* ctx, float distance, float height,
     return RZ_OK;
 }
 
+int32_t rzSetSize(RzContext* ctx, int32_t width, int32_t height) {
+    if (!ctx) return RZ_ERR_INVALID_ARG;
+    if (!validSize(width, height)) return recordError(ctx, "rzSetSize", RZ_ERR_SIZE);
+    setSize(ctx, width, height);                  // vale no próximo rzRender
+    return RZ_OK;
+}
+
 int32_t rzRender(RzContext* ctx) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
-    // Acompanha o tamanho do canvas (a página o muda com a janela); sem
-    // tamanho que sirva, mantém o último
-    int32_t w, h;
-    if (canvasDrawableSize(&w, &h) && (w != ctx->width || h != ctx->height)) setSize(ctx, w, h);
     renderFrame(ctx);
     return recordError(ctx, "rzRender", glGetError() == GL_NO_ERROR ? RZ_OK : RZ_ERR_GL);
 }

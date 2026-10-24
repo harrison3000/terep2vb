@@ -1,7 +1,7 @@
 // O WebGL 2 que o renderer usa: as funções são imports do módulo "gl",
 // feitas por web/webgl.js, uma para uma, com os nomes e os números do
 // OpenGL ES 3.0. Ponteiros são posições na memória do módulo. Mais as duas
-// do canvas: o contexto (criado uma vez) e o tamanho do drawing buffer.
+// do canvas: o contexto (criado uma vez).
 #pragma once
 
 #include <cstddef>
@@ -86,10 +86,8 @@ constexpr GLenum GL_FRAMEBUFFER_COMPLETE    = 0x8CD5;
 
 #define RZ_GL(name) extern "C" __attribute__((import_module("gl"), import_name(#name)))
 
-// O canvas (webgl.js): cria o contexto WebGL 2 na primeira vez (false: não
-// há) e dá o tamanho do drawing buffer
+// O canvas (webgl.js): cria o contexto WebGL 2 na primeira vez (false: não há)
 RZ_GL(canvasContext) bool canvasContext();
-RZ_GL(canvasSize)    void canvasSize(int32_t* width, int32_t* height);
 
 RZ_GL(glGetError)       GLenum glGetError();
 RZ_GL(glGetIntegerv)    void glGetIntegerv(GLenum name, GLint* data);

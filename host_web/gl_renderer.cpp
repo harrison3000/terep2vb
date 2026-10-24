@@ -132,14 +132,17 @@ static void apply_fog()
     fog_changed = false;
 }
 
-bool gl_start()
+static int canvas_height;                  // for the text
+
+bool gl_start(int width, int height)
 {
     banner_color = 0;
     fog_changed = true;
     cam_mode = RZ_CAMERA_FOLLOW;            // the library's default
     fov_target = fov_current = FOV_SLOW;
 
-    if (rzCreate(&ctx) != RZ_OK)
+    canvas_height = height;
+    if (rzCreate(width, height, &ctx) != RZ_OK)
         return false;
     // the map's layers: height and tile, 256 x 256, change while playing
     rzSetTerrainScale(ctx, 1.0f, 16.0f/255.5f);
@@ -291,7 +294,13 @@ void gl_tick()
         cam_filter.step(car_get(ci), carros[ci].camera_pt, cam_mode & CAM_UP);
 }
 
-void gl_frame(int height)
+void gl_resize(int width, int height)
+{
+    canvas_height = height;
+    rzSetSize(ctx, width, height);
+}
+
+void gl_frame()
 {
     game_keys();
     engine_sound(world.player_car[0], 0);      // what draw_view does for the sound
@@ -331,7 +340,7 @@ void gl_frame(int height)
     rzRender(ctx);
 
     // the text from the left edge, as the library fills the canvas
-    draw_texts((float)height / screen_h());
+    draw_texts((float)canvas_height / screen_h());
 }
 
 void gl_stop()
