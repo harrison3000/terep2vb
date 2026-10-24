@@ -149,8 +149,11 @@ constexpr float   kSmokeNoiseSpeed     = 0.4f;   // fumaça: avanço do ruído p
 // kCascadeFarRecenter tiles ou o terreno muda). Transição de kCascadeBlend
 // tiles entre elas. Na visão geral, só a 2, com o terreno inteiro e os objetos.
 constexpr int32_t kShadowMaps           = 3;
-// As três numa textura array de profundidade (uma camada por cascata, todas
-// do mesmo lado); pedido, limitado a GL_MAX_TEXTURE_SIZE na criação (ctx->shadowSize).
+// As cascatas numa textura array de profundidade (uma camada por cascata,
+// todas do mesmo lado): o padrão de rzCreate, limitado a GL_MAX_TEXTURE_SIZE
+// na criação (ctx->shadowSize). Com ctx->cascades == 1 (qualidades mais
+// leves), uma cascata só, até ctx->shadowReach, na camada 0; as matrizes das
+// outras são cópias.
 constexpr int32_t kShadowMapSize        = 2048;
 constexpr float   kCascadeSplit0        = 8.0f;   // tiles do olho
 constexpr float   kCascadeSplit1        = 30.0f;
@@ -500,6 +503,8 @@ struct RzContext {
     rz::Mat4   shadowMatrix[rz::kShadowMaps] = {};     // do frame; contíguas (glUniformMatrix4fv)
     float      shadowTexel[rz::kShadowMaps] = {};      // tamanho do texel de cada mapa (mundo)
     int32_t    shadowSize = 0;                       // lado dos mapas (já limitado pelo driver)
+    int32_t    cascades = rz::kShadowMaps;           // 3, ou 1 (mais leve): camadas e FBOs
+    float      shadowReach = rz::kCascadeSplit1;     // tiles: até onde vão as cascatas 0 e 1 (com 1, a única)
     bool       terrainShadowDirty = true;            // terreno mudou: cascata 2 refeita...
     bool       terrainShadowAll   = true;            // ...inteira, ou só a caixa abaixo (mundo)
     rz::Vec3   terrainShadowLo = { 0.0f, 0.0f, 0.0f }, terrainShadowHi = { 0.0f, 0.0f, 0.0f };
@@ -709,11 +714,8 @@ inline int32_t recordError(RzContext* ctx, const char* function, int32_t err) {
 }
 
 // rz_render.cpp
-GLuint linkProgram(const char* vertexSource, const char* fragmentSource);
-// Shaders de rz_shaders.h (#embed: bytes terminados em 0)
-inline GLuint linkProgram(const unsigned char* vertexSource, const unsigned char* fragmentSource) {
-    return linkProgram(reinterpret_cast<const char*>(vertexSource), reinterpret_cast<const char*>(fragmentSource));
-}
+// Um programa pelos nomes dos seus shaders em web/shaders.js ("terrain.vert", ...)
+GLuint linkProgram(const char* vertexName, const char* fragmentName);
 
 // rz_render.cpp: neblina (programa já em uso)
 void initFogUniforms(GLuint program, FogUniforms& u);

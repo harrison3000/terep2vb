@@ -30,7 +30,6 @@
 #include <cmath>
 
 #include "rz_internal.h"
-#include "rz_shaders.h"
 
 namespace rz {
 
@@ -128,7 +127,7 @@ void setSpritePalette(RzContext* ctx, const uint8_t* paletteRGB) {
 
 bool createSprites(RzContext* ctx) {
     SpriteProgram& p = ctx->spriteProgram;
-    p.program = linkProgram(kSpriteVertexShader, kSpriteFragmentShader);
+    p.program = linkProgram("sprite.vert", "sprite.frag");
     if (!p.program) return false;
     p.viewProj = glGetUniformLocation(p.program, "uViewProj");
     p.right    = glGetUniformLocation(p.program, "uRight");

@@ -83,13 +83,21 @@ int32_t rzGetError(RzContext* ctx, const char** outFunction) {
     return err;
 }
 
-int32_t rzCreate(int32_t width, int32_t height, RzContext** outCtx) {
+int32_t rzCreate(int32_t width, int32_t height, int32_t shadowSize, int32_t cascades, float reach,
+                 RzContext** outCtx) {
     if (!outCtx) return recordCreateError("rzCreate", RZ_ERR_INVALID_ARG);
     *outCtx = nullptr;
     if (!validSize(width, height)) return recordCreateError("rzCreate", RZ_ERR_SIZE);
+    if (shadowSize == 0) shadowSize = kShadowMapSize;
+    if (shadowSize < 256 || shadowSize > 4096 || (shadowSize & (shadowSize - 1)) || (cascades != 1 && cascades != 3) ||
+        (cascades == 1 && !(reach >= 1.0f && reach <= 60.0f)))               // pega NaN
+        return recordCreateError("rzCreate", RZ_ERR_INVALID_ARG);
     if (!canvasContext()) return recordCreateError("rzCreate", RZ_ERR_GL);
 
     RzContext* ctx = new RzContext;     // padrões nos inicializadores dos membros
+    ctx->shadowSize = shadowSize;       // pedido; createShadowMaps limita ao driver
+    ctx->cascades   = cascades;
+    ctx->shadowReach = cascades == 1 ? reach : kCascadeSplit1;
     setSize(ctx, width, height);
     updateTerrainBounds(ctx);
     if (!createRenderer(ctx)) {

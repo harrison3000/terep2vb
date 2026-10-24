@@ -13,6 +13,7 @@
   #maps button { display: block; margin: 4px 0; padding: 6px 12px; font: inherit; cursor: pointer; }
   #maps.loading button { opacity: 0.5; cursor: progress; }
   .small { color: #999; font-size: 0.9em; }
+  .options label { display: block; margin: 4px 0; }   /* one option a line */
   #game { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }
   #screen { image-rendering: pixelated; }
   #gl, #overlay { position: fixed; inset: 0; width: 100vw; height: 100vh; }
@@ -42,16 +43,21 @@
   <p>Pick a folder with maps (a map is a folder with <code>map.pcx</code>, <code>col.pcx</code> and
   <code>car1.dat</code>). The files are read here, in the browser: nothing is uploaded.</p>
   <p><input type="file" id="folder" webkitdirectory multiple></p>
-  <p>
+  <p class="options">
     <label>Renderer <select id="renderer">
       <option value="software">Software (the original's)</option>
       <option value="webgl">OpenGL (WebGL 2)</option>
     </select></label>
-    <label>Draw distance <input type="range" id="distance" min="1" max="110" value="30">
+    <label class="gl-only">Quality <select id="quality">
+      <option value="high">High</option>
+      <option value="medium">Medium (one shadow map, 3/4 resolution)</option>
+      <option value="low">Low (short, coarse shadows, half resolution)</option>
+    </select></label>
+    <label class="gl-only">Draw distance <input type="range" id="distance" min="1" max="110" value="30">
       <span id="distanceText"></span></label>
   </p>
-  <p>
-    <label>Render scale <select id="scale">
+  <p class="options">
+    <label class="sw-only">Render scale <select id="scale">
       <option value="1">1x (the original)</option><option value="2">2x</option>
       <option value="3" selected>3x</option><option value="4">4x</option>
     </select></label>

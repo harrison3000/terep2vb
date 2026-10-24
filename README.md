@@ -98,10 +98,13 @@ and then http://localhost:8000. The sound is the same AdLib emulation (Nuked-OPL
 too, played through an AudioWorklet), and there is the same minimap, in the bottom right corner
 of the window. Both renderers: the software one, and the OpenGL one, drawn with WebGL 2:
 `host_web/gl_renderer.cpp` (the game's side) and `host_web/rz`, the renderer itself (from Harrison's
-[renderizeitor](https://github.com/harrison3000/renderizeitor): GLSL ES 3.00 shaders, PCX files
-from memory, the page's canvas), whose WebGL calls are imports of the module done one for one by
-`web/webgl.js`. The page draws the text over it; the draw distance (where the fog starts, 1 to
-110 tiles) is a slider by the map list. No map preview; Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
+[renderizeitor](https://github.com/harrison3000/renderizeitor): PCX files from memory, the page's
+canvas), whose WebGL calls are imports of the module done one for one by `web/webgl.js`; its GLSL
+ES 3.00 shaders are in `web/shaders.js`, asked for by name. The page draws the text over it; the
+draw distance (where the fog starts, 1 to 110 tiles) is a slider by the map list, and the quality
+another: high (three shadow cascades of 2048), medium (one of 2048 up to 25 tiles, 0.75 of the
+screen's resolution; the default on a touch screen) or low (one of 512 up to 20 tiles, half the
+resolution). No map preview; Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
 the replays give the same frames as the Win16 port there too.
 
 ### Higher resolution
@@ -176,8 +179,8 @@ host/
   Nuked-OPL3/   OPL3 emulator (git submodule, LGPL 2.1)
 host_web/       the web host (WebAssembly): web_main.cpp, and the OpenGL renderer with WebGL 2,
                 gl_renderer.cpp and rz/ (the renderer)
-web/            the web page, what is served: index.html, terep2.js, webgl.js, opl_player.js and,
-                once built, terep2.wasm
+web/            the web page, what is served: index.html, terep2.js, webgl.js, shaders.js,
+                opl_player.js and, once built, terep2.wasm
 host_test/      the test host (terep2-headless)
   main.cpp      replays a recording of the Win16 port and compares the frames
 data/           the maps (not in the repository)

@@ -1,0 +1,636 @@
+// The OpenGL renderer's shaders (GLSL ES 3.00, WebGL 2), by name: the
+// renderer (host_web/rz) asks for them by these names, with its #defines
+// (CASCADES: 3 shadow cascades, or 1 in medium quality), and webgl.js puts
+// the "#version 300 es" line and the defines before the text.
+// Comments in Portuguese, as the renderer's.
+
+export const shaders = {
+
+// Terreno: malha montada na CPU na carga (rz_terrain.cpp), um vértice por
+// canto de triângulo, com a cor do triângulo (sem luz), (u, v, bloco) e a
+// normal da face. Luz flat: ambiente + difusa pela normal, por triângulo
+// (os três vértices têm a mesma normal; `flat` pega a do último).
+'terrain.vert': `layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec4 aColor;      // B, G, R, 0 normalizados
+layout(location = 2) in vec4 aUvLayer;    // u, v em {0, 1}; bloco 0..255; -
+layout(location = 3) in vec4 aNormal;     // normal da face (10 bits por eixo)
+uniform mat4 uViewProj;
+uniform mat4 uModel;                      // identidade; rodas: posição/giro de cada roda
+uniform mat4 uShadowMatrix[3];            // luz: cascatas 0, 1 e 2
+uniform vec3 uShadowOffset;               // normal offset de cada cascata (mundo)
+uniform vec3  uLight;                     // direção para a luz (normalizada)
+uniform float uAmbient;
+
+flat out vec3  vColor;                    // cor base do triângulo, SEM luz
+flat out int   vLayer;
+flat out float vLight;                    // luz flat do triângulo, 0..1
+out float vLightSmooth;                   // a mesma luz, interpolada (normais por vértice): rodas
+out vec2 vUV;
+out vec3 vShadow0;
+#if CASCADES == 3
+out vec3 vShadow1, vShadow2;
+#endif
+out vec3 vWorld;                          // para a neblina
+out float vNdotL;                         // normal · luz (sombra no terminador)
+
+void main() {
+    vec3 n = normalize(mat3(uModel) * aNormal.xyz);
+    vNdotL = dot(n, uLight);
+    vLight = uAmbient + (1.0 - uAmbient) * max(vNdotL, 0.0);
+    vLightSmooth = vLight;
+    vColor = aColor.bgr;
+    vUV    = aUvLayer.xy;
+    vLayer = int(aUvLayer.z);
+    vec4 world = uModel * vec4(aPosition, 1.0);
+    // Normal offset: lê o mapa de sombra num ponto empurrado pela normal, mais
+    // quanto mais rasante a luz (o acne some sem descolar a sombra)
+    vec3 push = n * clamp(1.0 - vNdotL, 0.0, 1.0);
+    vShadow0 = (uShadowMatrix[0] * (world + vec4(push * uShadowOffset.x, 0.0))).xyz * 0.5 + 0.5;
+#if CASCADES == 3
+    vShadow1 = (uShadowMatrix[1] * (world + vec4(push * uShadowOffset.y, 0.0))).xyz * 0.5 + 0.5;
+    vShadow2 = (uShadowMatrix[2] * (world + vec4(push * uShadowOffset.z, 0.0))).xyz * 0.5 + 0.5;
+#endif
+    vWorld = world.xyz;
+    gl_Position = uViewProj * world;
+}
+`,
+
+// Filtro fixo, só estado do sampler: nearest dentro do nível de mipmap e
+// mistura linear entre níveis (GL_NEAREST_MIPMAP_LINEAR); textureGrad com as
+// derivadas tiradas antes do desvio da neblina.
+// Com textura, a cor é multiplicada por um sombreamento leve (a luz flat do
+// triângulo atenuada por uShading) e, na sombra, por uShadowDim. Nas cores
+// flat, que já vêm iluminadas, a luz do triângulo cai para uShadowLight.
+// A saída tem alfa 0 (o canvas é opaco: alpha false em webgl.js).
+'terrain.frag': `precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+precision highp sampler2DArrayShadow;
+flat in vec3  vColor;                     // cor base, sem luz
+flat in int   vLayer;
+flat in float vLight;
+in float vLightSmooth;
+in vec2 vUV;
+in vec3 vShadow0;
+#if CASCADES == 3
+in vec3 vShadow1, vShadow2;
+#endif
+in vec3 vWorld;
+in float vNdotL;
+
+// Terminador: com a luz rasante ou por trás (n · l perto de 0 ou negativo) a
+// face fica na sombra de vez, em vez de alternar luz/sombra pela resolução
+// do mapa; a luz direta ali já é quase zero, então a troca é suave.
+uniform float uShadowTerminator;
+
+// Neblina: smoothstep da distância a uFogOrigin entre uFogStart e uFogEnd, na
+// cor uFogColor (a de fundo).
+uniform int   uFogOn;
+uniform float uFogStart, uFogEnd;
+uniform vec3  uFogColor;
+uniform vec3  uEye;
+uniform vec3  uFogOrigin;   // olho (seguindo) ou centro do mapa (visão geral)
+
+uniform sampler2DArray  uAtlas;
+uniform sampler2DArrayShadow uShadow;     // as três cascatas, uma por camada
+uniform vec3  uCascade;                   // fim da cascata 0, fim da 1, faixa de transição (mundo)
+uniform int   uCascadeOnlyFar;            // visão geral: só a cascata 2
+uniform int   uTextured;
+uniform int   uSmooth;                    // 1: luz por pixel (vLightSmooth), p/ as rodas
+uniform float uShading;
+uniform float uShadowLight;               // luz na sombra (kShadowLight)
+uniform float uShadowDim;                 // chão texturizado na sombra: fator fixo
+
+out vec4 fragColor;
+
+// Sombra: 1 iluminado, 0 na sombra. Fora da caixa de um mapa, ele não sombreia.
+// sampler2DArrayShadow com GL_LINEAR: PCF 2x2 do hardware. textureGrad com
+// derivadas zero (nível 0): o mapa não tem mipmap e a leitura fica dentro de
+// um if (sem derivadas; o GLSL ES não tem textureLod para array shadow).
+float shadowLit(float cascade, vec3 c) {
+    if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z > 1.0) return 1.0;
+    return textureGrad(uShadow, vec4(c.xy, cascade, c.z), vec2(0.0), vec2(0.0));   // nível 0
+}
+
+#if CASCADES == 1
+// Uma cascata só (qualidade média): até uCascade.y, sumindo na faixa de
+// uCascade.z antes dela; a visão geral usa a mesma camada.
+float shadowTerm() {
+    if (uCascadeOnlyFar != 0) return shadowLit(0.0, vShadow0);
+    float d = length(vWorld - uEye);
+    float b = uCascade.z;
+    if (d < uCascade.y - b) return shadowLit(0.0, vShadow0);
+    if (d < uCascade.y) return mix(shadowLit(0.0, vShadow0), 1.0, (d - (uCascade.y - b)) / b);
+    return 1.0;
+}
+#else
+// Cascatas (rz_shadow.cpp): escolhe pela distância ao olho; numa faixa de
+// uCascade.z antes de cada divisa, mistura as duas vizinhas. Visão geral: só a 2.
+float shadowTerm() {
+    if (uCascadeOnlyFar != 0) return shadowLit(2.0, vShadow2);
+    float d = length(vWorld - uEye);
+    float b = uCascade.z;
+    if (d < uCascade.x - b) return shadowLit(0.0, vShadow0);
+    if (d < uCascade.x)
+        return mix(shadowLit(0.0, vShadow0), shadowLit(1.0, vShadow1), (d - (uCascade.x - b)) / b);
+    if (d < uCascade.y - b) return shadowLit(1.0, vShadow1);
+    if (d < uCascade.y)
+        return mix(shadowLit(1.0, vShadow1), shadowLit(2.0, vShadow2), (d - (uCascade.y - b)) / b);
+    return shadowLit(2.0, vShadow2);
+}
+#endif
+
+// Fator de neblina (0 limpo, 1 só neblina)
+float fogFactor() {
+    if (uFogOn == 0) return 0.0;
+    return smoothstep(uFogStart, uFogEnd, length(vWorld - uFogOrigin));
+}
+
+
+void main() {
+    // Derivadas antes de qualquer desvio: a neblina sai cedo em parte dos pixels
+    vec2 dUVx = dFdx(vUV), dUVy = dFdy(vUV);
+    float fog = fogFactor();
+    if (fog >= 1.0) {                        // só neblina: nem textura nem sombra
+        fragColor = vec4(uFogColor, 0.0);
+        return;
+    }
+    float lit   = shadowTerm() * smoothstep(0.0, uShadowTerminator, vNdotL);
+    float base  = (uSmooth != 0) ? vLightSmooth : vLight;   // por pixel nas rodas, flat no resto
+    float light = mix(min(uShadowLight, base), base, lit);
+    vec3 color;
+    if (uTextured == 0) {
+        color = vColor * light;                             // vColor já é a cor base, sem luz
+        fragColor = vec4(mix(color, uFogColor, fog), 0.0);
+        return;
+    }
+    vec3 uvw = vec3(vUV, float(vLayer));
+    vec4 tex = textureGrad(uAtlas, uvw, dUVx, dUVy);         // nearest no nível, linear entre níveis
+    if (tex.a < 0.5) discard;                                // índice 255 do PCX: transparente
+    vec3 texel = tex.rgb;
+    color = texel * mix(1.0, vLight, uShading) * mix(uShadowDim, 1.0, lit);
+    fragColor = vec4(mix(color, uFogColor, fog), 0.0);
+}
+`,
+
+// Objetos: posição no mundo, normal de fora do polígono (a mesma em todos os
+// triângulos dele, mesmo não plano), UV e cor. Luz flat como no terreno, na
+// textura ou na cor sólida do vértice.
+'object.vert': `layout(location = 0) in vec3 aPosition;   // linhas e faces das rodas: posição direta
+layout(location = 1) in vec4 aNormal;     // idem, normal (10 bits por eixo)
+layout(location = 2) in vec2 aUV;
+layout(location = 3) in ivec3 aPolygon;   // objetos: vértice (-1: usa aPosition/aNormal),
+                                          // início e tamanho do polígono em uIndices
+layout(location = 4) in vec4 aColor;      // cor sólida e, no alfa, o tipo do canto (kCorner*)
+uniform mat4 uViewProj;
+uniform mat4 uModel;                      // identidade; rodas: posição/giro de cada roda
+uniform int  uFromBuffer;                 // 1: objetos (posições em uPositions); 0: faces das rodas
+// O bloco do objeto (rz_internal.h: kMaxObjectVertices, kMaxObjectIndices)
+layout(std140) uniform ObjectData {
+    vec4  uPositions[256];                // posições no mundo dos vértices do objeto
+    ivec4 uIndices[768];                  // índices dos polígonos (sem os fechamentos), quatro por ivec4
+};
+uniform mat4 uShadowMatrix[3];            // luz: cascatas 0, 1 e 2
+uniform vec3 uShadowOffset;               // normal offset de cada cascata (mundo)
+uniform vec3  uLight;                     // direção para a luz (normalizada)
+uniform float uAmbient;
+flat out float vLight;
+flat out vec4 vColor;
+out vec2 vUV;
+out vec3 vShadow0;
+#if CASCADES == 3
+out vec3 vShadow1, vShadow2;
+#endif
+out vec3 vWorld;                          // para a neblina
+out float vNdotL;                         // normal · luz (sombra no terminador)
+
+vec3 vertexAt(int i) { return uPositions[i].xyz; }
+int indexAt(int i) { return uIndices[i / 4][i % 4]; }
+
+// Normal de fora do polígono (Newell): uma só para o polígono inteiro, mesmo
+// não plano. No sentido do legado (horário visto de fora), a de Newell aponta
+// para dentro; a de fora é a oposta. Degenerada: para baixo (como packNormal).
+vec3 polygonNormal(int first, int count) {
+    vec3 n = vec3(0.0);
+    vec3 cur = vertexAt(indexAt(first + count - 1));
+    for (int k = 0; k < count; ++k) {
+        vec3 next = vertexAt(indexAt(first + k));
+        n += vec3((next.y - cur.y) * (next.z + cur.z),
+                  (next.z - cur.z) * (next.x + cur.x),
+                  (next.x - cur.x) * (next.y + cur.y));
+        cur = next;
+    }
+    return dot(n, n) > 1.0e-20 ? n : vec3(0.0, -1.0, 0.0);
+}
+
+void main() {
+    vec3 position = aPosition;
+    vec3 normal = aNormal.xyz;
+    if (uFromBuffer != 0 && aPolygon.x >= 0) {
+        position = vertexAt(aPolygon.x);
+        normal = polygonNormal(aPolygon.y, aPolygon.z);
+    }
+    vec3 n = normalize(mat3(uModel) * normal);
+    vNdotL = dot(n, uLight);
+    vLight = uAmbient + (1.0 - uAmbient) * max(vNdotL, 0.0);
+    vUV = aUV;
+    vColor = aColor;
+    vec4 world = uModel * vec4(position, 1.0);
+    // Normal offset: lê o mapa de sombra num ponto empurrado pela normal, mais
+    // quanto mais rasante a luz (o acne some sem descolar a sombra)
+    vec3 push = n * clamp(1.0 - vNdotL, 0.0, 1.0);
+    vShadow0 = (uShadowMatrix[0] * (world + vec4(push * uShadowOffset.x, 0.0))).xyz * 0.5 + 0.5;
+#if CASCADES == 3
+    vShadow1 = (uShadowMatrix[1] * (world + vec4(push * uShadowOffset.y, 0.0))).xyz * 0.5 + 0.5;
+    vShadow2 = (uShadowMatrix[2] * (world + vec4(push * uShadowOffset.z, 0.0))).xyz * 0.5 + 0.5;
+#endif
+    vWorld = world.xyz;
+    gl_Position = uViewProj * world;
+}
+`,
+
+// Mesmo filtro do chão (estado do sampler).
+'object.frag': `precision highp float;
+precision highp int;
+precision highp sampler2D;
+precision highp sampler2DArrayShadow;
+flat in float vLight;
+flat in vec4 vColor;                      // cor sólida; alfa: 0 texturizado, 0,5 buraco, 1 cor sólida
+in vec2 vUV;
+in vec3 vShadow0;
+#if CASCADES == 3
+in vec3 vShadow1, vShadow2;
+#endif
+in vec3 vWorld;
+in float vNdotL;
+
+// Terminador: com a luz rasante ou por trás (n · l perto de 0 ou negativo) a
+// face fica na sombra de vez, em vez de alternar luz/sombra pela resolução
+// do mapa; a luz direta ali já é quase zero, então a troca é suave.
+uniform float uShadowTerminator;
+
+// Neblina: smoothstep da distância a uFogOrigin entre uFogStart e uFogEnd, na
+// cor uFogColor (a de fundo).
+uniform int   uFogOn;
+uniform float uFogStart, uFogEnd;
+uniform vec3  uFogColor;
+uniform vec3  uEye;
+uniform vec3  uFogOrigin;   // olho (seguindo) ou centro do mapa (visão geral)
+
+uniform sampler2D       uTexture;
+uniform sampler2DArrayShadow uShadow;     // as três cascatas, uma por camada
+uniform vec3  uCascade;                   // fim da cascata 0, fim da 1, faixa de transição (mundo)
+uniform int   uCascadeOnlyFar;            // visão geral: só a cascata 2
+uniform float uShadowLight;               // luz na sombra (kShadowLight)
+
+out vec4 fragColor;
+
+// Sombra: 1 iluminado, 0 na sombra. Fora da caixa de um mapa, ele não sombreia.
+// sampler2DArrayShadow com GL_LINEAR: PCF 2x2 do hardware. textureGrad com
+// derivadas zero (nível 0): o mapa não tem mipmap e a leitura fica dentro de
+// um if (sem derivadas; o GLSL ES não tem textureLod para array shadow).
+float shadowLit(float cascade, vec3 c) {
+    if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z > 1.0) return 1.0;
+    return textureGrad(uShadow, vec4(c.xy, cascade, c.z), vec2(0.0), vec2(0.0));   // nível 0
+}
+
+#if CASCADES == 1
+// Uma cascata só (qualidade média): até uCascade.y, sumindo na faixa de
+// uCascade.z antes dela; a visão geral usa a mesma camada.
+float shadowTerm() {
+    if (uCascadeOnlyFar != 0) return shadowLit(0.0, vShadow0);
+    float d = length(vWorld - uEye);
+    float b = uCascade.z;
+    if (d < uCascade.y - b) return shadowLit(0.0, vShadow0);
+    if (d < uCascade.y) return mix(shadowLit(0.0, vShadow0), 1.0, (d - (uCascade.y - b)) / b);
+    return 1.0;
+}
+#else
+// Cascatas (rz_shadow.cpp): escolhe pela distância ao olho; numa faixa de
+// uCascade.z antes de cada divisa, mistura as duas vizinhas. Visão geral: só a 2.
+float shadowTerm() {
+    if (uCascadeOnlyFar != 0) return shadowLit(2.0, vShadow2);
+    float d = length(vWorld - uEye);
+    float b = uCascade.z;
+    if (d < uCascade.x - b) return shadowLit(0.0, vShadow0);
+    if (d < uCascade.x)
+        return mix(shadowLit(0.0, vShadow0), shadowLit(1.0, vShadow1), (d - (uCascade.x - b)) / b);
+    if (d < uCascade.y - b) return shadowLit(1.0, vShadow1);
+    if (d < uCascade.y)
+        return mix(shadowLit(1.0, vShadow1), shadowLit(2.0, vShadow2), (d - (uCascade.y - b)) / b);
+    return shadowLit(2.0, vShadow2);
+}
+#endif
+
+// Fator de neblina (0 limpo, 1 só neblina)
+float fogFactor() {
+    if (uFogOn == 0) return 0.0;
+    return smoothstep(uFogStart, uFogEnd, length(vWorld - uFogOrigin));
+}
+
+
+void main() {
+    // Derivadas antes de qualquer desvio: a neblina sai cedo em parte dos pixels
+    vec2 dUVx = dFdx(vUV), dUVy = dFdy(vUV);
+    float fog = fogFactor();
+    if (fog >= 1.0) {
+        fragColor = vec4(uFogColor, 0.0);
+        return;
+    }
+    vec3 texel;
+    if (vColor.a < 0.25) {                                   // texturizado
+        vec4 tex = textureGrad(uTexture, vUV, dUVx, dUVy);   // nearest no nível, linear entre níveis
+        if (tex.a < 0.5) discard;                            // índice 255 do PCX: transparente
+        texel = tex.rgb;
+    } else if (vColor.a < 0.75) {
+        discard;                                             // a cor sólida 255: transparente
+    } else {
+        texel = vColor.rgb;                                  // cor sólida: a mesma luz do texel
+    }
+    float lit = shadowTerm() * smoothstep(0.0, uShadowTerminator, vNdotL);
+    vec3 color = texel * mix(min(uShadowLight, vLight), vLight, lit);
+    fragColor = vec4(mix(color, uFogColor, fog), 0.0);
+}
+`,
+
+// Vidro (rz_glass.cpp): saída rgb = brilho especular, a = cinza do filtro;
+// blending GL_ONE, GL_SRC_ALPHA → destino = brilho + destino x cinza.
+'glass.vert': `layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec3 aNormal;     // de fora, por polígono
+layout(location = 2) in float aTint;
+uniform mat4 uViewProj;
+uniform mat4 uShadowMatrix[3];
+flat out vec3  vNormal;
+flat out float vTint;
+out vec3 vWorld;
+out vec3 vShadow0;
+#if CASCADES == 3
+out vec3 vShadow1, vShadow2;
+#endif
+void main() {
+    vec4 world = vec4(aPosition, 1.0);
+    vNormal = aNormal;
+    vTint = aTint;
+    vWorld = aPosition;
+    vShadow0 = (uShadowMatrix[0] * world).xyz * 0.5 + 0.5;
+#if CASCADES == 3
+    vShadow1 = (uShadowMatrix[1] * world).xyz * 0.5 + 0.5;
+    vShadow2 = (uShadowMatrix[2] * world).xyz * 0.5 + 0.5;
+#endif
+    gl_Position = uViewProj * world;
+}
+`,
+'glass.frag': `precision highp float;
+precision highp int;
+precision highp sampler2DArrayShadow;
+flat in vec3  vNormal;
+flat in float vTint;
+in vec3 vWorld;
+in vec3 vShadow0;
+#if CASCADES == 3
+in vec3 vShadow1, vShadow2;
+#endif
+uniform sampler2DArrayShadow uShadow;     // as três cascatas, uma por camada
+uniform vec3  uCascade;
+uniform int   uCascadeOnlyFar;
+uniform vec3  uLight;                     // direção para a luz (normalizada)
+uniform float uSpecular, uShininess;
+uniform int   uFogOn;
+uniform float uFogStart, uFogEnd;
+uniform vec3  uFogColor;
+uniform vec3  uEye;
+uniform vec3  uFogOrigin;   // olho (seguindo) ou centro do mapa (visão geral)
+out vec4 fragColor;
+
+float shadowLit(float cascade, vec3 c) {
+    if (c.x < 0.0 || c.x > 1.0 || c.y < 0.0 || c.y > 1.0 || c.z > 1.0) return 1.0;
+    return textureGrad(uShadow, vec4(c.xy, cascade, c.z), vec2(0.0), vec2(0.0));   // nível 0
+}
+
+#if CASCADES == 1
+// Uma cascata só (qualidade média): até uCascade.y, sumindo na faixa de
+// uCascade.z antes dela; a visão geral usa a mesma camada.
+float shadowTerm() {
+    if (uCascadeOnlyFar != 0) return shadowLit(0.0, vShadow0);
+    float d = length(vWorld - uEye);
+    float b = uCascade.z;
+    if (d < uCascade.y - b) return shadowLit(0.0, vShadow0);
+    if (d < uCascade.y) return mix(shadowLit(0.0, vShadow0), 1.0, (d - (uCascade.y - b)) / b);
+    return 1.0;
+}
+#else
+// Cascatas (rz_shadow.cpp): escolhe pela distância ao olho; numa faixa de
+// uCascade.z antes de cada divisa, mistura as duas vizinhas. Visão geral: só a 2.
+float shadowTerm() {
+    if (uCascadeOnlyFar != 0) return shadowLit(2.0, vShadow2);
+    float d = length(vWorld - uEye);
+    float b = uCascade.z;
+    if (d < uCascade.x - b) return shadowLit(0.0, vShadow0);
+    if (d < uCascade.x)
+        return mix(shadowLit(0.0, vShadow0), shadowLit(1.0, vShadow1), (d - (uCascade.x - b)) / b);
+    if (d < uCascade.y - b) return shadowLit(1.0, vShadow1);
+    if (d < uCascade.y)
+        return mix(shadowLit(1.0, vShadow1), shadowLit(2.0, vShadow2), (d - (uCascade.y - b)) / b);
+    return shadowLit(2.0, vShadow2);
+}
+#endif
+
+void main() {
+    float fog = uFogOn != 0 ? smoothstep(uFogStart, uFogEnd, length(vWorld - uFogOrigin)) : 0.0;
+    if (fog >= 1.0) discard;
+    vec3 n = normalize(vNormal);
+    vec3 v = normalize(uEye - vWorld);
+    float ndl = dot(n, uLight);
+    float spec = 0.0;
+    if (ndl > 0.0) {
+        float lit = shadowTerm();
+        vec3 h = normalize(uLight + v);
+        spec = pow(max(dot(n, h), 0.0), uShininess) * uSpecular * lit;
+    }
+    spec *= 1.0 - fog;
+    fragColor = vec4(vec3(spec), mix(vTint, 1.0, fog));
+}
+`,
+
+// Sprites (rz_sprites.cpp): quad virado para a câmera, aberto no vertex
+// shader a partir do centro, do raio e do canto (-1/+1); neblina.
+//   Detrito (tipo 0): alfa da textura de ruído (array, uma camada por quadro);
+//     cor já com luz.
+//   Fumaça (tipo 1): disco branco, alfa = ruído de valor 3D (posição no disco
+//     + centro no mundo, tempo) x opacidade, com a borda suavizada.
+'sprite.vert': `// Um sprite por instância (rz_sprites.cpp): o quad sai de gl_VertexID, seis
+// vértices, dois triângulos
+layout(location = 0) in vec4 aCenterRadius;
+layout(location = 1) in ivec2 aFrameType;   // quadro do ruído, tipo
+layout(location = 2) in vec4 aColor;        // B, G, R, 0 normalizados
+layout(location = 3) in float aOpacity;     // fumaça: multiplicador do ruído
+uniform mat4 uViewProj;
+uniform vec3 uRight, uUp;
+out vec3 vUV;
+flat out vec3 vColor;
+flat out float vOpacity;
+flat out int vType;
+flat out vec3 vCenter;
+out vec3 vWorld;
+const vec2 kCorners[6] = vec2[6](vec2(-1.0, -1.0), vec2(1.0, -1.0), vec2(1.0, 1.0),
+                                 vec2(-1.0, -1.0), vec2(1.0, 1.0), vec2(-1.0, 1.0));
+void main() {
+    vec2 corner = kCorners[gl_VertexID];
+    vec3 p = aCenterRadius.xyz + (uRight * corner.x + uUp * corner.y) * aCenterRadius.w;
+    vUV = vec3(corner * 0.5 + 0.5, float(aFrameType.x));
+    vColor = aColor.bgr;
+    vOpacity = aOpacity;
+    vType = aFrameType.y;
+    vCenter = aCenterRadius.xyz;
+    vWorld = p;
+    gl_Position = uViewProj * vec4(p, 1.0);
+}
+`,
+'sprite.frag': `precision highp float;
+precision highp int;
+precision highp sampler2DArray;
+in vec3 vUV;
+flat in vec3 vColor;
+flat in float vOpacity;
+flat in int vType;
+flat in vec3 vCenter;
+in vec3 vWorld;
+uniform sampler2DArray uNoise;
+uniform float uTime;        // segundos x velocidade do ruído da fumaça
+uniform int   uFogOn;
+uniform float uFogStart, uFogEnd;
+uniform vec3  uFogColor;
+uniform vec3  uEye;
+uniform vec3  uFogOrigin;   // olho (seguindo) ou centro do mapa (visão geral)
+out vec4 fragColor;
+float hash3(vec3 p) {
+    p = fract(p * 0.3183099 + 0.1) * 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float valueNoise(vec3 x) {          // 0..1, suave (interpolação cúbica)
+    vec3 i = floor(x), f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash3(i),                   hash3(i + vec3(1.0, 0.0, 0.0)), f.x),
+                   mix(hash3(i + vec3(0.0, 1.0, 0.0)), hash3(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+               mix(mix(hash3(i + vec3(0.0, 0.0, 1.0)), hash3(i + vec3(1.0, 0.0, 1.0)), f.x),
+                   mix(hash3(i + vec3(0.0, 1.0, 1.0)), hash3(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+}
+void main() {
+    vec3 color;
+    float a;
+    if (vType == 1) {               // fumaça
+        vec2 q = vUV.xy * 2.0 - 1.0;
+        float d = length(q);
+        if (d >= 1.0) discard;
+        vec3 np = vec3(q * 1.6 + vCenter.xz * 0.7 + vec2(vCenter.y * 0.5), uTime);
+        float n = 0.65 * valueNoise(np) + 0.35 * valueNoise(np * 2.03 + 17.0);
+        a = n * (1.0 - smoothstep(0.5, 1.0, d));
+        color = vec3(1.0);
+    } else {                        // detrito
+        a = texture(uNoise, vUV).r;
+        color = vColor;
+    }
+    a *= vOpacity;
+    if (a <= 0.0) discard;
+    float fog = uFogOn != 0 ? smoothstep(uFogStart, uFogEnd, length(vWorld - uFogOrigin)) : 0.0;
+    if (fog >= 1.0) discard;
+    fragColor = vec4(mix(color, uFogColor, fog), a);
+}
+`,
+
+// Parede de limite (rz_border.cpp): semitransparente, com X vermelhos de
+// uXSize tiles; só perto do alvo (fade entre uFadeFar e uFadeNear, distância
+// horizontal do alvo ao ponto da parede); com neblina.
+'wall.vert': `layout(location = 0) in vec3 aPosition;
+layout(location = 1) in vec2 aUV;          // tiles ao longo da parede / acima da base
+uniform mat4 uViewProj;
+out vec2 vUV;
+out vec3 vWorld;
+void main() {
+    vUV = aUV;
+    vWorld = aPosition;
+    gl_Position = uViewProj * vec4(aPosition, 1.0);
+}
+`,
+'wall.frag': `precision highp float;
+precision highp int;
+in vec2 vUV;
+in vec3 vWorld;
+uniform vec3  uTarget;
+uniform float uFadeNear, uFadeFar;
+uniform float uXSize;
+uniform float uCellSize;
+uniform float uTop, uTopFade;   // v (tiles acima da base) do topo e faixa em que a parede some
+uniform int   uFogOn;
+uniform float uFogStart, uFogEnd;
+uniform vec3  uFogColor;
+uniform vec3  uEye;
+uniform vec3  uFogOrigin;   // olho (seguindo) ou centro do mapa (visão geral)
+out vec4 fragColor;
+void main() {
+    float near = 1.0 - smoothstep(uFadeNear, uFadeFar, length(vWorld.xz - uTarget.xz));
+    if (near <= 0.0) discard;
+    // Padrão preso ao mundo: ao longo da parede (u, tiles) e na altura do
+    // mundo (não acompanha o relevo). Uma célula de uXSize tiles por círculo:
+    // disco vermelho com borda branca e um X vazado no meio (mostra o fundo).
+    // Raio R (fração da célula): diâmetro = metade da célula, então o espaço
+    // entre dois círculos vizinhos é do tamanho de um círculo.
+    const float R = 0.25;
+    vec2  p  = vec2(vUV.x, vWorld.y / uCellSize) / uXSize;
+    vec2  c  = fract(p) - 0.5;
+    float r  = length(c);
+    float aa = fwidth(p.x) + 0.002;                        // borda suave, ~1 pixel
+    float disc  = 1.0 - smoothstep(R - aa, R + aa, r);
+    float inner = 1.0 - smoothstep(R * 0.83 - aa, R * 0.83 + aa, r);
+    float ring  = disc - inner;                            // borda branca
+    float dx    = min(abs(c.x - c.y), abs(c.x + c.y)) * 0.70710678;
+    float xMask = (1.0 - smoothstep(R * 0.13 - aa, R * 0.13 + aa, dx))
+                * (1.0 - smoothstep(R * 0.6 - aa, R * 0.6 + aa, r));
+    float red   = inner * (1.0 - xMask);
+    vec3  color = vec3(0.62, 0.09, 0.07);                  // fundo: vermelho translúcido, escuro
+    float alpha = 0.20;
+    color = mix(color, vec3(0.92, 0.10, 0.07), red);  alpha = mix(alpha, 0.85, red);
+    color = mix(color, vec3(1.0, 1.0, 1.0), ring);    alpha = mix(alpha, 0.90, ring);
+    alpha *= near;
+    alpha *= 1.0 - smoothstep(uTop - uTopFade, uTop, vUV.y);   // topo: some aos poucos
+    if (uFogOn != 0) {
+        float fog = smoothstep(uFogStart, uFogEnd, length(vWorld - uFogOrigin));
+        color = mix(color, uFogColor, fog);
+        alpha *= 1.0 - fog;
+    }
+    fragColor = vec4(color, alpha);
+}
+`,
+
+// Passe da sombra: só profundidade, do ponto de vista da luz. Serve para o
+// terreno e para os objetos (posição no atributo 0 nos dois).
+'depth.vert': `layout(location = 0) in vec3 aPosition;
+uniform mat4 uLightViewProj;
+uniform mat4 uModel;                      // identidade; rodas: posição/giro de cada roda
+void main() {
+    gl_Position = uLightViewProj * (uModel * vec4(aPosition, 1.0));
+}
+`,
+'depth.frag': `precision highp float;
+precision highp int;
+void main() {
+}
+`,
+
+// Passe da sombra dos objetos: posição do bloco do objeto (fragment: depth.frag)
+'object_depth.vert': `// Passe da sombra dos objetos: a posição vem do bloco do objeto (como em
+// object.vert); as linhas trazem a posição direta (vértice -1).
+layout(location = 0) in vec3 aPosition;
+layout(location = 3) in ivec3 aPolygon;   // vértice do objeto (-1: usa aPosition), polígono
+uniform mat4 uLightViewProj;
+// O bloco do objeto (rz_internal.h: kMaxObjectVertices, kMaxObjectIndices)
+layout(std140) uniform ObjectData {
+    vec4  uPositions[256];                // posições no mundo dos vértices do objeto
+    ivec4 uIndices[768];                  // índices dos polígonos, quatro por ivec4
+};
+void main() {
+    vec3 position = aPolygon.x >= 0 ? uPositions[aPolygon.x].xyz : aPosition;
+    gl_Position = uLightViewProj * vec4(position, 1.0);
+}
+`,
+};

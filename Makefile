@@ -139,7 +139,7 @@ build/wasm/terep2-headless: build/wasm/terep2-headless.wasm tools/wasi_run.mjs
 WASM_CC      ?= clang
 RZ_WEB_OBJ   := $(patsubst host_web/rz/%.cpp,build/wasm/rz/%.o,$(wildcard host_web/rz/*.cpp))
 RZ_WEB_FLAGS := --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 -std=c++23 -fno-exceptions -fno-rtti \
-                -Wall -Wextra -Wno-c23-extensions
+                -Wall -Wextra
 WEB_OBJ      := $(patsubst build/%,build/wasm/%,$(GAME_OBJ)) build/wasm/web/web_main.o \
                 build/wasm/web/gl_renderer.o build/wasm/opl3.o $(RZ_WEB_OBJ)
 build/wasm/web/gl_renderer.o: WEB_WARN := -Wno-vla-cxx-extension -Wno-missing-braces

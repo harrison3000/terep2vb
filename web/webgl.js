@@ -1,3 +1,5 @@
+import { shaders } from './shaders.js';
+
 // WebGL 2 for terep2.wasm's OpenGL renderer: the imports of its module "gl"
 // (host_web/rz/rz_gl.h), each the WebGL call of the same name, on a canvas.  The
 // module names WebGL's objects (textures, buffers...) by numbers, as OpenGL
@@ -111,15 +113,10 @@ export function webglImports(canvas, getMemory) {
 
         glCreateShader: (type) => create(gl.createShader(type)),
         glDeleteShader: (n) => { gl.deleteShader(obj(n)); objects.delete(n); },
-        glShaderSource(n, count, srcs, lens) {
-            const m = i32();
-            let text = '';
-            for (let i = 0; i < count; i++) {
-                const p = m[(srcs >> 2) + i], len = lens ? m[(lens >> 2) + i] : -1;
-                text += len >= 0 ? decoder.decode(new Uint8Array(buffer(), p, len)) : cstr(p);
-            }
-            gl.shaderSource(obj(n), text);
-        },
+        // the text of a shader of shaders.js, after the #version and the
+        // renderer's #defines
+        shaderSourceByName: (n, name, defines) =>
+            gl.shaderSource(obj(n), '#version 300 es\n' + cstr(defines) + shaders[cstr(name)]),
         glCompileShader: (n) => gl.compileShader(obj(n)),
         glGetShaderiv: parameter((s, name) => gl.getShaderParameter(s, name)),
         glGetShaderInfoLog: (n, max, lenp, p) => putString(gl.getShaderInfoLog(obj(n)), max, lenp, p),

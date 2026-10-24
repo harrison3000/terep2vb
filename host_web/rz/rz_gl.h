@@ -124,8 +124,9 @@ RZ_GL(glFramebufferTextureLayer) void glFramebufferTextureLayer(GLenum target, G
 
 RZ_GL(glCreateShader)      GLuint glCreateShader(GLenum type);
 RZ_GL(glDeleteShader)      void glDeleteShader(GLuint shader);
-RZ_GL(glShaderSource)      void glShaderSource(GLuint shader, GLsizei count, const GLchar* const* src,
-                                               const GLint* length);
+// O texto do shader: o de `name` em web/shaders.js, depois do #version e
+// de `defines` (linhas "#define ...")
+RZ_GL(shaderSourceByName)  void shaderSourceByName(GLuint shader, const char* name, const char* defines);
 RZ_GL(glCompileShader)     void glCompileShader(GLuint shader);
 RZ_GL(glGetShaderiv)       void glGetShaderiv(GLuint shader, GLenum name, GLint* params);
 RZ_GL(glGetShaderInfoLog)  void glGetShaderInfoLog(GLuint shader, GLsizei max, GLsizei* len, GLchar* log);

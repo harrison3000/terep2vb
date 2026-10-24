@@ -30,7 +30,6 @@
 #include <cmath>
 
 #include "rz_internal.h"
-#include "rz_shaders.h"
 
 namespace rz {
 
@@ -317,7 +316,7 @@ bool createBorder(RzContext* ctx) {
     glBindVertexArray(0);
 
     WallProgram& w = ctx->wallProgram;
-    w.program = linkProgram(kWallVertexShader, kWallFragmentShader);
+    w.program = linkProgram("wall.vert", "wall.frag");
     if (!w.program) return false;
     w.viewProj   = glGetUniformLocation(w.program, "uViewProj");
     w.target     = glGetUniformLocation(w.program, "uTarget");

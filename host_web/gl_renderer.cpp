@@ -134,7 +134,7 @@ static void apply_fog()
 
 static int canvas_height;                  // for the text
 
-bool gl_start(int width, int height)
+bool gl_start(int width, int height, int quality)
 {
     banner_color = 0;
     fog_changed = true;
@@ -142,7 +142,11 @@ bool gl_start(int width, int height)
     fov_target = fov_current = FOV_SLOW;
 
     canvas_height = height;
-    if (rzCreate(width, height, &ctx) != RZ_OK)
+    // the shadows, the GPU's heaviest work: high, three maps of 2048 (the
+    // library's); medium, one of 2048 up to 25 tiles; low, one of 512 up to 20
+    static const struct { int size, cascades; float reach; } shadows[] = { { 0, 3, 0 }, { 2048, 1, 25 }, { 512, 1, 20 } };
+    const auto &q = shadows[quality < 0 ? 0 : quality > 2 ? 2 : quality];
+    if (rzCreate(width, height, q.size, q.cascades, q.reach, &ctx) != RZ_OK)
         return false;
     // the map's layers: height and tile, 256 x 256, change while playing;
     // the tiles before the heights, so the terrain's mesh is built once

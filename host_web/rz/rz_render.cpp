@@ -3,7 +3,6 @@
 #include <cstdio>
 
 #include "rz_internal.h"
-#include "rz_shaders.h"
 
 namespace rz {
 
@@ -13,39 +12,42 @@ namespace {
 // (startPrograms), e o status de cada um só é perguntado quando ele é usado
 // (linkProgram). Perguntar logo depois do link faz o WebGL esperar a
 // compilação de um por um; assim o driver compila todos juntos.
+// Os textos dos shaders ficam na página (web/shaders.js), pedidos pelo nome
+// do arquivo, com os #defines da qualidade (CASCADES).
 struct PendingProgram {
-    const char* vertexSource;
-    const char* fragmentSource;
+    const char* vertexName;
+    const char* fragmentName;
     GLuint program, vs, fs;
 };
 constexpr int32_t kMaxPending = 8;
 PendingProgram g_pending[kMaxPending];      // um contexto por vez
 int32_t g_pendingCount = 0;
+char g_defines[64];                         // os #defines do contexto em criação
 
-GLuint startShader(GLenum type, const char* source) {
+GLuint startShader(GLenum type, const char* name) {
     GLuint shader = glCreateShader(type);
-    glShaderSource(shader, 1, &source, nullptr);
+    shaderSourceByName(shader, name, g_defines);
     glCompileShader(shader);
     return shader;
 }
 
-PendingProgram startProgram(const char* vertexSource, const char* fragmentSource) {
-    PendingProgram p = { vertexSource, fragmentSource, glCreateProgram(),
-                         startShader(GL_VERTEX_SHADER, vertexSource),
-                         startShader(GL_FRAGMENT_SHADER, fragmentSource) };
+PendingProgram startProgram(const char* vertexName, const char* fragmentName) {
+    PendingProgram p = { vertexName, fragmentName, glCreateProgram(),
+                         startShader(GL_VERTEX_SHADER, vertexName),
+                         startShader(GL_FRAGMENT_SHADER, fragmentName) };
     glAttachShader(p.program, p.vs);
     glAttachShader(p.program, p.fs);
     glLinkProgram(p.program);
     return p;
 }
 
-bool shaderCompiled(GLuint shader) {
+bool shaderCompiled(GLuint shader, const char* name) {
     GLint ok = 0;
     glGetShaderiv(shader, GL_COMPILE_STATUS, &ok);
     if (!ok) {
         char log[2048];
         glGetShaderInfoLog(shader, sizeof(log), nullptr, log);
-        std::printf("shader: %s\n", log);
+        std::printf("shader %s: %s\n", name, log);
     }
     return ok;
 }
@@ -55,10 +57,10 @@ GLuint finishProgram(const PendingProgram& p) {
     GLint ok = 0;
     glGetProgramiv(p.program, GL_LINK_STATUS, &ok);
     if (!ok) {
-        if (shaderCompiled(p.vs) && shaderCompiled(p.fs)) {
+        if (shaderCompiled(p.vs, p.vertexName) && shaderCompiled(p.fs, p.fragmentName)) {
             char log[2048];
             glGetProgramInfoLog(p.program, sizeof(log), nullptr, log);
-            std::printf("link: %s\n", log);
+            std::printf("link %s + %s: %s\n", p.vertexName, p.fragmentName, log);
         }
         glDeleteProgram(p.program);
     }
@@ -67,22 +69,17 @@ GLuint finishProgram(const PendingProgram& p) {
     return ok ? p.program : 0;
 }
 
-template <size_t V, size_t F>
-void startProgram(const unsigned char (&vertexSource)[V], const unsigned char (&fragmentSource)[F]) {
-    g_pending[g_pendingCount++] = startProgram(reinterpret_cast<const char*>(vertexSource),
-                                               reinterpret_cast<const char*>(fragmentSource));
-}
-
 // Todos os programas do contexto, de uma vez (ver PendingProgram)
-void startPrograms() {
+void startPrograms(const RzContext* ctx) {
+    std::snprintf(g_defines, sizeof(g_defines), "#define CASCADES %d\n", int(ctx->cascades));
+    static const char* const kPrograms[][2] = {
+        { "terrain.vert", "terrain.frag" }, { "object.vert", "object.frag" },
+        { "depth.vert", "depth.frag" },     { "object_depth.vert", "depth.frag" },
+        { "wall.vert", "wall.frag" },       { "glass.vert", "glass.frag" },
+        { "sprite.vert", "sprite.frag" },
+    };
     g_pendingCount = 0;
-    startProgram(kTerrainVertexShader, kTerrainFragmentShader);
-    startProgram(kObjectVertexShader, kObjectFragmentShader);
-    startProgram(kDepthVertexShader, kDepthFragmentShader);
-    startProgram(kObjectDepthVertexShader, kDepthFragmentShader);
-    startProgram(kWallVertexShader, kWallFragmentShader);
-    startProgram(kGlassVertexShader, kGlassFragmentShader);
-    startProgram(kSpriteVertexShader, kSpriteFragmentShader);
+    for (const auto& names : kPrograms) g_pending[g_pendingCount++] = startProgram(names[0], names[1]);
 }
 
 constexpr GLint kUnitAtlas  = 0;    // unidade de textura do atlas (e da textura do objeto)
@@ -90,17 +87,17 @@ constexpr GLint kUnitAtlas  = 0;    // unidade de textura do atlas (e da textura
 
 } // namespace
 
-// Um programa (também usado por rz_border.cpp, rz_glass.cpp, rz_sprites.cpp):
-// o já pedido por startPrograms, ou compilado agora
-GLuint linkProgram(const char* vertexSource, const char* fragmentSource) {
+// Um programa, pelos nomes dos shaders (também usado por rz_border.cpp,
+// rz_glass.cpp, rz_sprites.cpp): o já pedido por startPrograms, ou compilado agora
+GLuint linkProgram(const char* vertexName, const char* fragmentName) {
     for (int32_t i = 0; i < g_pendingCount; ++i) {
         const PendingProgram p = g_pending[i];
-        if (p.vertexSource == vertexSource && p.fragmentSource == fragmentSource) {
+        if (!std::strcmp(p.vertexName, vertexName) && !std::strcmp(p.fragmentName, fragmentName)) {
             g_pending[i] = g_pending[--g_pendingCount];
             return finishProgram(p);
         }
     }
-    return finishProgram(startProgram(vertexSource, fragmentSource));
+    return finishProgram(startProgram(vertexName, fragmentName));
 }
 
 void initFogUniforms(GLuint program, FogUniforms& u) {
@@ -131,9 +128,9 @@ void initLightUniforms(GLuint program) {
 }
 
 bool createRenderer(RzContext* ctx) {
-    startPrograms();
+    startPrograms(ctx);
     TerrainProgram& t = ctx->terrainProgram;
-    t.program = linkProgram(kTerrainVertexShader, kTerrainFragmentShader);
+    t.program = linkProgram("terrain.vert", "terrain.frag");
     if (!t.program) return false;
     t.viewProj = glGetUniformLocation(t.program, "uViewProj");
     t.atlas    = glGetUniformLocation(t.program, "uAtlas");
@@ -155,7 +152,7 @@ bool createRenderer(RzContext* ctx) {
     initLightUniforms(t.program);
 
     ObjectProgram& o = ctx->objectProgram;
-    o.program = linkProgram(kObjectVertexShader, kObjectFragmentShader);
+    o.program = linkProgram("object.vert", "object.frag");
     if (!o.program) return false;
     o.viewProj = glGetUniformLocation(o.program, "uViewProj");
     o.texture  = glGetUniformLocation(o.program, "uTexture");
@@ -174,7 +171,7 @@ bool createRenderer(RzContext* ctx) {
     if (!createFallbackTexture(ctx)) return false;
 
     DepthProgram& d = ctx->depthProgram;
-    d.program = linkProgram(kDepthVertexShader, kDepthFragmentShader);
+    d.program = linkProgram("depth.vert", "depth.frag");
     if (!d.program) return false;
     d.lightViewProj = glGetUniformLocation(d.program, "uLightViewProj");
     d.model         = glGetUniformLocation(d.program, "uModel");
@@ -182,7 +179,7 @@ bool createRenderer(RzContext* ctx) {
     setMatrix(d.model, Mat4::identity());
 
     DepthProgram& od = ctx->objectDepthProgram;
-    od.program = linkProgram(kObjectDepthVertexShader, kDepthFragmentShader);
+    od.program = linkProgram("object_depth.vert", "depth.frag");
     if (!od.program) return false;
     od.lightViewProj = glGetUniformLocation(od.program, "uLightViewProj");
     glUseProgram(od.program);

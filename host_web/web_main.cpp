@@ -160,9 +160,10 @@ EXPORT("web_audio_frames") int web_audio_frames() { return (int)(audio.size() / 
 
 // A game on the files added, at a render scale (1..MAX_RENDER_SCALE) and with
 // the extra options (fix_ice_bug, hide_banner), drawn by the game itself or,
-// with gl, by the OpenGL renderer (web_canvas_size first).  Returns false if the
-// map cannot be played (no car1.dat...) or the renderer cannot start.
-EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bool gl)
+// with gl, by the OpenGL renderer (web_canvas_size first), in a quality (0
+// high, 1 medium, 2 low).  Returns false if the map cannot be played (no
+// car1.dat...) or the renderer cannot start.
+EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bool gl, int quality)
 {
     stop_game();
     render_scale = scale < 1 ? 1 : scale > MAX_RENDER_SCALE ? MAX_RENDER_SCALE : scale;
@@ -175,7 +176,7 @@ EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bo
         return false;
     opengl = gl;
     texts.clear();
-    if (opengl && !gl_start(canvas_w, canvas_h)) {
+    if (opengl && !gl_start(canvas_w, canvas_h, quality)) {
         host_free_game();
         return false;
     }

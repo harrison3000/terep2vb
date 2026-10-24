@@ -72,10 +72,14 @@ typedef char RzAssertSpriteSize[sizeof(RzSprite) == 24 ? 1 : -1];
 #define RZ_ERR_FORMAT       6   /* arquivo em formato não suportado ou corrompido */
 
 /* Cria o contexto no canvas da página (webgl.js: o seu WebGL 2); width e
-   height: o tamanho do drawing buffer dele. rzRender desenha no framebuffer
+   height: o tamanho do drawing buffer dele. A qualidade das sombras, o que
+   mais pesa para a GPU: shadowSize, o lado dos mapas (potência de 2, 256 a
+   4096; 0: 2048), cascades, 3 (até 8 tiles, até 30 e até o fim da neblina)
+   ou 1 (mais leve: até reach tiles, 1 a 60; com 3, reach não vale). rzRender desenha no framebuffer
    do canvas, que o navegador mostra no fim do quadro de animação. Um
    contexto por vez. */
-int32_t rzCreate(int32_t width, int32_t height, RzContext** outCtx);
+int32_t rzCreate(int32_t width, int32_t height, int32_t shadowSize, int32_t cascades, float reach,
+                 RzContext** outCtx);
 
 /* O canvas mudou de tamanho (o host avisa só quando muda): vale a partir do
    próximo rzRender. */

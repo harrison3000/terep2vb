@@ -12,8 +12,8 @@ void web_text(float x, float y, float size, const uint8_t *rgb, const char *text
 
 // gl_renderer.cpp: the OpenGL renderer, on the page's canvas
 constexpr int DRAW_DISTANCE_MIN = 1, DRAW_DISTANCE_DEFAULT = 30, DRAW_DISTANCE_MAX = 110;  // tiles
-bool gl_start(int width, int height);   // after game_init, the canvas's size in pixels; false: cannot
-                                        // (no WebGL 2, the map's files)
+bool gl_start(int width, int height,    // after game_init, the canvas's size in pixels and the quality:
+              int quality);             // 0 high, 1 medium, 2 low; false: cannot (no WebGL 2, the map's files)
 void gl_resize(int width, int height);  // the canvas's size changed
 void gl_tick();                         // after each physics tick
 void gl_frame();                        // a frame

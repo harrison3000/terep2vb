@@ -18,7 +18,6 @@
 #include <cmath>
 
 #include "rz_internal.h"
-#include "rz_shaders.h"
 
 namespace rz {
 
@@ -69,7 +68,7 @@ void uploadGlass(Object& o) {
 
 bool createGlassProgram(RzContext* ctx) {
     GlassProgram& g = ctx->glassProgram;
-    g.program = linkProgram(kGlassVertexShader, kGlassFragmentShader);
+    g.program = linkProgram("glass.vert", "glass.frag");
     if (!g.program) return false;
     g.viewProj  = glGetUniformLocation(g.program, "uViewProj");
     g.light     = glGetUniformLocation(g.program, "uLight");

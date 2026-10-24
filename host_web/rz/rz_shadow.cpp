@@ -169,11 +169,11 @@ void drawTerrainDepth(const RzContext* ctx, const Mat4& view, ShadowBox b) {
 bool createShadowMaps(RzContext* ctx) {
     GLint driverMax = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &driverMax);
-    const int32_t size = driverMax > 0 && kShadowMapSize > driverMax ? driverMax : kShadowMapSize;
+    const int32_t size = driverMax > 0 && ctx->shadowSize > driverMax ? driverMax : ctx->shadowSize;
     ctx->shadowSize = size;
     glGenTextures(1, &ctx->shadowTex);
     glBindTexture(GL_TEXTURE_2D_ARRAY, ctx->shadowTex);
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, size, size, kShadowMaps, 0,
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_DEPTH_COMPONENT24, size, size, ctx->cascades, 0,
                  GL_DEPTH_COMPONENT, GL_UNSIGNED_INT, nullptr);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -181,7 +181,7 @@ bool createShadowMaps(RzContext* ctx) {
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_COMPARE_REF_TO_TEXTURE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_COMPARE_FUNC, GL_LEQUAL);
-    for (int32_t i = 0; i < kShadowMaps; ++i) {
+    for (int32_t i = 0; i < ctx->cascades; ++i) {
         glGenFramebuffers(1, &ctx->shadowFbo[i]);
         glBindFramebuffer(GL_FRAMEBUFFER, ctx->shadowFbo[i]);
         glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, ctx->shadowTex, 0, i);
@@ -245,10 +245,11 @@ void renderShadowMaps(RzContext* ctx) {
     glPolygonOffset(kShadowOffsetFactor, kShadowOffsetUnits);
 
     if (overview) {
-        // Visão geral: só a cascata 2, terreno inteiro + objetos, todo frame
+        // Visão geral: só a cascata 2 (na qualidade média, a única), terreno
+        // inteiro + objetos, todo frame
         const ShadowBox whole = { 0.0f, 0.0f, radius };
         ctx->shadowMatrix[2] = boxProjection(ctx, whole) * view;
-        beginPass(ctx, 2, ctx->shadowMatrix[2]);
+        beginPass(ctx, ctx->cascades - 1, ctx->shadowMatrix[2]);
         if (ctx->hasTerrain()) {
             glBindVertexArray(ctx->terrainVao);
             glDrawArrays(GL_TRIANGLES, 0, kTriangleCount * 3);
@@ -265,13 +266,15 @@ void renderShadowMaps(RzContext* ctx) {
         return;
     }
 
-    // Cascatas 0 e 1: esfera da fatia, terreno (linhas da caixa) + objetos
-    const float splits[3] = { 0.0f, kCascadeSplit0 * cs, kCascadeSplit1 * cs };
+    // Cascatas 0 e 1: esfera da fatia, terreno (linhas da caixa) + objetos.
+    // Com uma cascata só: a 0, do olho até ctx->shadowReach
+    const float splits[3] = { 0.0f, kCascadeSplit0 * cs, ctx->shadowReach * cs };
     const float blend = kCascadeBlend * cs;
-    for (int32_t i = 0; i < 2; ++i) {
+    const bool single = ctx->cascades == 1;
+    for (int32_t i = 0; i < (single ? 1 : 2); ++i) {
         Vec3 center;
         const float d0 = i == 0 ? 0.0f : splits[i] - blend;
-        float half = sliceSphere(ctx, d0, splits[i + 1], &center);
+        float half = sliceSphere(ctx, d0, splits[single ? 2 : i + 1], &center);
         half += 2.0f * half / float(ctx->shadowSize);        // + texels do PCF
         // Tamanho em degraus de kCascadeSizeStep (arredonda para cima): mudando
         // o FOV, a caixa não muda de tamanho todo frame, e entre os degraus o
@@ -284,6 +287,15 @@ void renderShadowMaps(RzContext* ctx) {
         beginPass(ctx, i, ctx->shadowMatrix[i]);
         drawTerrainDepth(ctx, view, box);
         drawObjectsDepth(ctx, ctx->shadowMatrix[i], -1, -1);
+    }
+    if (single) {                       // sem a cascata 2 (os shaders da variante CASCADES 1 não as leem)
+        ctx->shadowMatrix[1] = ctx->shadowMatrix[2] = ctx->shadowMatrix[0];
+        ctx->shadowTexel[1] = ctx->shadowTexel[2] = ctx->shadowTexel[0];
+        ctx->cascadeFarValid = false;
+        ctx->terrainShadowDirty = false;
+        ctx->terrainShadowAll = false;
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        return;
     }
 
     // Cascata 2: só terreno, quadrado em volta do olho, refeito só quando precisa
@@ -367,7 +379,7 @@ void bindShadowMaps(const RzContext* ctx, const ShadowUniforms& u) {
     glActiveTexture(GL_TEXTURE0);
     setMatrices(u.matrices, ctx->shadowMatrix, kShadowMaps);
     const float cs = ctx->cellSize;
-    glUniform3f(u.cascade, kCascadeSplit0 * cs, kCascadeSplit1 * cs, kCascadeBlend * cs);
+    glUniform3f(u.cascade, kCascadeSplit0 * cs, ctx->shadowReach * cs, kCascadeBlend * cs);
     glUniform1i(u.onlyFar, ctx->shadowWholeTerrain ? 1 : 0);
     glUniform3f(u.offset, kShadowNormalOffset * ctx->shadowTexel[0], kShadowNormalOffset * ctx->shadowTexel[1],
                 kShadowNormalOffset * ctx->shadowTexel[2]);

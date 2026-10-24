@@ -149,6 +149,7 @@ let wasm = null;                    // the module's exports
 let maps = new Map();               // folder path -> its File objects
 let playing = false, last = 0;
 let webgl = false;                  // this game is drawn by the OpenGL renderer
+let quality = 'high';               // ...in this quality (QUALITIES)
 
 async function load() {
     let memory = null;
@@ -237,6 +238,7 @@ async function loadGame(dir) {
     savePrefs();
     wasm.web_audio_start($('sound').checked && audio ? audio.sampleRate : 0);
     webgl = $('renderer').value === 'webgl';
+    quality = $('quality').value in QUALITIES ? $('quality').value : 'high';
     $('screen').hidden = webgl;
     $('gl').hidden = $('overlay').hidden = !webgl;
     $('chooser').hidden = true;
@@ -245,7 +247,7 @@ async function loadGame(dir) {
         sizeCanvases();
         wasm.web_draw_distance(+$('distance').value);
     }
-    if (!wasm.web_start(+$('scale').value, $('fixice').checked, $('banner').checked, webgl)) {
+    if (!wasm.web_start(+$('scale').value, $('fixice').checked, $('banner').checked, webgl, QUALITIES[quality].code)) {
         $('game').hidden = true;
         $('chooser').hidden = false;
         alert(webgl ? 'This map cannot be played, or WebGL 2 is not available.' : 'This map cannot be played.');
@@ -270,12 +272,22 @@ function stop() {
 
 const picture = document.createElement('canvas');
 
+// The OpenGL renderer's qualities: the code web_start takes (the shadows,
+// gl_renderer.cpp) and the canvas's resolution, a fraction of the device's
+// pixels each way, stretched.
+const QUALITIES = {
+    high:   { code: 0, resolution: 1 },
+    medium: { code: 1, resolution: 0.75 },
+    low:    { code: 2, resolution: 0.5 },
+};
+
 // The OpenGL renderer's canvas and the text's over it: the whole window, in
-// device pixels.  When a game starts and when the window's size (or its
-// pixel ratio, another screen or a zoom) changes.
+// device pixels (or a part of them, QUALITIES).  When a game starts and when
+// the window's size (or its pixel ratio, another screen or a zoom) changes.
 function sizeCanvases() {
-    const w = Math.max(1, Math.floor(innerWidth * devicePixelRatio));
-    const h = Math.max(1, Math.floor(innerHeight * devicePixelRatio));
+    const ratio = devicePixelRatio * QUALITIES[quality].resolution;
+    const w = Math.max(1, Math.floor(innerWidth * ratio));
+    const h = Math.max(1, Math.floor(innerHeight * ratio));
     for (const c of [$('gl'), $('overlay')])
         if (c.width !== w || c.height !== h) {
             c.width = w;
@@ -367,6 +379,7 @@ function savePrefs() {
         localStorage.setItem('terep2web', JSON.stringify({
             scale: $('scale').value, fixice: $('fixice').checked, banner: $('banner').checked,
             sound: $('sound').checked, minimap: $('minimapOn').checked, renderer: $('renderer').value,
+            quality: $('quality').value,
             distance: $('distance').value }));
     } catch (e) { /* private mode: not kept */ }
 }
@@ -380,6 +393,7 @@ function loadPrefs() {
         if (p.sound !== undefined) $('sound').checked = p.sound;
         if (p.minimap !== undefined) $('minimapOn').checked = p.minimap;
         if (p.renderer) $('renderer').value = p.renderer;
+        if (p.quality) $('quality').value = p.quality;
         if (p.distance) $('distance').value = p.distance;
     } catch (e) { /* nothing saved */ }
 }
@@ -443,6 +457,16 @@ $('folder').onchange = () => {
     showMaps();
 };
 $('distance').oninput = () => { $('distanceText').textContent = $('distance').value + ' tiles'; };
+$('quality').value = touchScreen ? 'medium' : 'high';    // a phone's GPU: until something else is chosen
 loadPrefs();
+// Only the options of the chosen renderer: the scale is the software one's,
+// the quality and the draw distance the OpenGL one's.
+function showRendererOptions() {
+    const gl = $('renderer').value === 'webgl';
+    for (const e of document.querySelectorAll('.gl-only')) e.hidden = !gl;
+    for (const e of document.querySelectorAll('.sw-only')) e.hidden = gl;
+}
+$('renderer').onchange = showRendererOptions;
+showRendererOptions();
 $('distance').oninput();
 load().catch((e) => { $('status').textContent = 'Could not load terep2.wasm: ' + e; });
