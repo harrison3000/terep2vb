@@ -97,7 +97,7 @@ and kept in `extra_options`, which the map chooser shows as checkboxes:
 
 ### In a web page
 
-`make web` builds the game as WebAssembly (`web/terep2.wasm`, about 160 KB: clang for
+`make web` builds the game as WebAssembly (`web/terep2.wasm`, about 300 KB: clang for
 wasm32-wasip1 with the WASI libc and libc++, no Emscripten) with its own small host,
 `web/web_main.cpp`. The page (`web/index.html`, `web/terep2.js`) asks for a folder, finds the maps
 in it and reads their files right there in the browser (nothing is uploaded), then runs the game
@@ -108,8 +108,10 @@ page needs to be served, not opened as a file:
 
 and then http://localhost:8000. The sound is the same AdLib emulation (Nuked-OPL3, in the module
 too, played through an AudioWorklet), and there is the same minimap, in the bottom right corner
-of the window. For now: the software renderer only, no map preview; Esc goes back to the list
-of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
+of the window. Both renderers: the software one, and the OpenGL one (`host/renderer_gl.cpp` with
+the renderizeitor library, in the same module) drawn with WebGL 2, whose OpenGL calls are done by
+`web/webgl.js` (texture buffers, BGRA and the GLSL 3.30 shaders adapted there, so the library is
+unchanged); no map preview; Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
 the replays give the same frames as the Win16 port there too.
 
 ### Higher resolution
@@ -184,7 +186,8 @@ host/
   minimap.cpp   the optional minimap drawn over the game's picture
   imgui/        Dear ImGui (git submodule)
   Nuked-OPL3/   OPL3 emulator (git submodule, LGPL 2.1)
-web/            the game in a web page: web_main.cpp (its host, WebAssembly), index.html, terep2.js
+web/            the game in a web page: web_main.cpp (its host, WebAssembly), index.html, terep2.js,
+                webgl.js and rz_platform_web.cpp (the OpenGL renderer with WebGL 2)
 host_test/      the test host (terep2-headless)
   main.cpp      replays a recording of the Win16 port and compares the frames
 data/           the maps (not in the repository)

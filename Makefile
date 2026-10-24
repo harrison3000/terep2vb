@@ -149,16 +149,34 @@ build/wasm/terep2-headless: build/wasm/terep2-headless.wasm tools/wasi_run.mjs
 
 # The web page (web/): the game as a WebAssembly "reactor" for the browser, with web/web_main.cpp
 # as its host.  Serve the folder (python3 -m http.server -d web) and open it.
+# The OpenGL renderer there: host/renderer_gl.cpp and the renderizeitor's sources (with
+# web/rz_platform_web.cpp in place of its EGL platform), whose OpenGL calls are imports of the
+# module, done with WebGL 2 by web/webgl.js; the library's PCX files come through --wrap=fopen.
 WASM_CC      ?= clang
-WEB_OBJ      := $(patsubst build/%,build/wasm/%,$(GAME_OBJ)) build/wasm/web/web_main.o build/wasm/opl3.o
+RZ_WEB_SRC   := $(filter-out $(RZ)/src/rz_platform_egl.cpp,$(wildcard $(RZ)/src/*.cpp))
+RZ_WEB_OBJ   := $(patsubst $(RZ)/src/%.cpp,build/wasm/rz/%.o,$(RZ_WEB_SRC)) build/wasm/rz/rz_platform_web.o
+RZ_WEB_FLAGS := --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 -std=c++23 -fno-exceptions -fno-rtti \
+                -Wall -Wno-c23-extensions -I$(RZ)/include
+WEB_OBJ      := $(patsubst build/%,build/wasm/%,$(GAME_OBJ)) build/wasm/web/web_main.o build/wasm/opl3.o \
+                build/wasm/web/renderer_gl.o $(RZ_WEB_OBJ)
 build/wasm/web/%.o: web/%.cpp | $(OPL3)/opl3.h
 	@mkdir -p $(@D)
 	$(WASM_CXX) $(WASM_FLAGS) -I$(OPL3) $(DEPFLAGS) -c -o $@ $<
+build/wasm/web/renderer_gl.o: host/renderer_gl.cpp | $(RZ)/Makefile
+	@mkdir -p $(@D)
+	$(WASM_CXX) $(WASM_FLAGS) -Wno-vla-cxx-extension -Wno-missing-braces -DTEREP2_GLR -DTEREP2_WEB -Ihost \
+		$(DEPFLAGS) -c -o $@ $<
+build/wasm/rz/%.o: $(RZ)/src/%.cpp | $(RZ)/Makefile
+	@mkdir -p $(@D)
+	$(WASM_CXX) $(RZ_WEB_FLAGS) $(DEPFLAGS) -c -o $@ $<
+build/wasm/rz/rz_platform_web.o: web/rz_platform_web.cpp | $(RZ)/Makefile
+	@mkdir -p $(@D)
+	$(WASM_CXX) $(RZ_WEB_FLAGS) $(DEPFLAGS) -c -o $@ $<
 build/wasm/opl3.o: $(OPL3)/opl3.c | $(OPL3)/opl3.h
 	@mkdir -p $(@D)
 	$(WASM_CC) --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 $(DEPFLAGS) -c -o $@ $<
 web/terep2.wasm: $(WEB_OBJ)
-	$(WASM_CXX) $(WASM_FLAGS) -mexec-model=reactor -Wl,--strip-debug -o $@ $^
+	$(WASM_CXX) $(WASM_FLAGS) -mexec-model=reactor -Wl,--strip-debug -Wl,--wrap=fopen -o $@ $^
 web: web/terep2.wasm
 
 wasm-test: build/wasm/terep2-headless

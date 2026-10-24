@@ -7,6 +7,9 @@
  *
  * The calls into the library are marked LIB: they are compiled only with
  * the library (make sdl; not with make no_gl).  What else it will need: TODO-lib.md.
+ * The web page uses this file too (make web, TEREP2_WEB): the library draws
+ * with WebGL 2 on the page's canvas (web/webgl.js), there is one context
+ * only, and the text is drawn by the page (web_text, web_main.cpp).
  *
  * This file has a surprising amount of human generated code and gambiarras :)
  *
@@ -14,15 +17,21 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
-#include "imgui.h"
 #include "game_renderer.hpp"
-#include "gui.hpp"
-#include "launcher.hpp"
 #include "renderer_api.hpp"
 #include "vec3f.hpp"
+#ifdef TEREP2_WEB
+    // web_main.cpp: a text the page draws over the picture, at (x, y) in canvas pixels
+    void web_text(float x, float y, float size, const uint8_t *rgb, const char *text);
+#else
+    #include "imgui.h"
+    #include "gui.hpp"
+#endif
 
 #ifdef TEREP2_GLR
+    #ifndef TEREP2_WEB
     #include <SDL_opengl.h>
+    #endif
     #include "renderizeitor/include/renderizeitor.h"
     static RzContext* ctx;
 
@@ -121,6 +130,11 @@
 // made current only around its calls, and the host's is always put back
 // (otherwise, after Esc, nothing would reach the window: the chooser would
 // not show and the library's last frame would stay on the screen).
+#ifdef TEREP2_WEB
+// The page has one WebGL context, the library's: nothing to switch.
+static void use_lib() {}
+static void use_host() {}
+#else
 static SDL_GLContext lib_gl;
 
 static void use_lib() { SDL_GL_MakeCurrent(gui_window(), lib_gl); }
@@ -130,6 +144,7 @@ static void use_host()
     glFlush();                              // the library's drawing first, then the host's
     SDL_GL_MakeCurrent(gui_window(), gui_context());
 }
+#endif
 #endif
 
 static uint8_t banner_color;               // as game_frame's, which is not called here
@@ -171,6 +186,12 @@ bool opengl_start()
     (void)files;
     (void)layers;
 
+#ifdef TEREP2_WEB
+    // the page's canvas (web/rz_platform_web.cpp): any window but null will do
+    int ok = rzCreateWindow((SDL_Window *)1, &ctx);
+    if (ok != RZ_OK)
+        return false;
+#else
     auto w = gui_window();
 
     int ok = rzCreateWindow(w, &ctx);
@@ -180,6 +201,7 @@ bool opengl_start()
         SDL_GL_MakeCurrent(w, gui_context());
         return false;
     }
+#endif
     rzSetTerrainScale(ctx, 1.0f, 16.0f/255.5f);
     rzSetHeightmap(ctx, layers.height, 256,256);
     rzLoadTileAtlas(ctx, files.maptex.c_str());
@@ -216,14 +238,16 @@ bool opengl_start()
     //TODO one more error checking here
     
     use_host();                             // only now: every rz* call above needs the library's context
+#ifndef TEREP2_WEB
     SDL_GL_SetSwapInterval(1);              // the library's context turns vsync off for the window
+#endif
     return true;
 #else
     return false;
 #endif
 }
 
-// game_frame's text, in ImGui's font:
+// game_frame's text, in ImGui's font (on the web, the page's):
 // at (x, y) of the original 320 x 200 screen, in palette colour colour.
 static void draw_text(const PictureRect &at, const char *s, int x, int y, uint8_t colour)
 {
@@ -235,9 +259,13 @@ static void draw_text(const PictureRect &at, const char *s, int x, int y, uint8_
             text += *s == 9 ? ' ' : *s;
     const float px = at.k * render_scale;   // window pixels per pixel of the original
     const uint8_t *c = host_palette(colour);
+#ifdef TEREP2_WEB
+    web_text(at.x0 + x * px, at.y0 + (y - 2) * px, 7.5f * px, c, text.c_str());
+#else
     ImDrawList *dl = ImGui::GetForegroundDrawList();
     dl->AddText(nullptr, 7.5f * px, ImVec2(at.x0 + x * px, at.y0 + (y - 2) * px), IM_COL32(c[0], c[1], c[2], 255),
                 text.c_str());
+#endif
 }
 
 static void draw_texts(const PictureRect &at)

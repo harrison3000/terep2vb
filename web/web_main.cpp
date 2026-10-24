@@ -9,14 +9,20 @@
  * at 60 Hz.  Sound: the game's AdLib writes go to the Nuked-OPL3 emulator,
  * whose samples, made as the time advances, the page plays (web_audio_*).
  * The minimap: the map's picture (web_minimap) and where the cars are
- * (web_car_*).  No OpenGL renderer.  See web/terep2.js.
+ * (web_car_*).  The OpenGL renderer (host/renderer_gl.cpp, with the
+ * renderizeitor library) draws with WebGL 2 on the page's canvas: the
+ * library's OpenGL calls are imports done by web/webgl.js
+ * (rz_platform_web.cpp), and the text is drawn by the page (web_text_*).
+ * See web/terep2.js.
  */
 #include <cstdlib>
 #include <cstring>
 #include <string>
 #include <strings.h>
 #include <vector>
+#include "../host/game_renderer.hpp"
 #include "../host/host.hpp"
+#include "../host/renderer_api.hpp"
 extern "C" {
 #include "opl3.h"
 }
@@ -33,6 +39,8 @@ struct File {
 std::vector<File> files;        // the map's, by their names (any case)
 
 bool running = false;
+bool opengl = false;            // this game is drawn by the OpenGL renderer
+int view_w = 1, view_h = 1;     // the canvas's size (OpenGL renderer), web_view
 double tick_ms = 0, frame_ms = 0;  // time not yet spent on ticks / frames
 std::vector<uint32_t> picture;  // the last frame, RGBA
 
@@ -46,16 +54,73 @@ void chip_write(uint8_t reg, uint8_t value)
     OPL3_WriteReg(&chip, reg, value);
 }
 
+struct Text {
+    float x, y, size;           // canvas pixels: where the top left corner is, the font's size
+    uint32_t rgb;               // 0xRRGGBB
+    std::string text;           // lines split by '\n'
+};
+std::vector<Text> texts;        // the OpenGL renderer's texts of the last frame
+
+const File *find_file(const char *name)
+{
+    for (const File &f : files)
+        if (strcasecmp(f.name.c_str(), name) == 0)
+            return &f;
+    return nullptr;
+}
+
+void stop_game()
+{
+    if (running) {
+        if (opengl)
+            opengl_stop();
+        host_free_game();
+    }
+    running = false;
+}
+
 } // namespace
 
 // The map's files, read from memory with the case of the name ignored, as
 // the SDL host does on the disk.
 FILE *data_fopen(const char *name)
 {
-    for (const File &f : files)
-        if (strcasecmp(f.name.c_str(), name) == 0)
-            return fmemopen(f.data, f.size, "rb");
-    return nullptr;
+    const File *f = find_file(name);
+    return f ? fmemopen(f->data, f->size, "rb") : nullptr;
+}
+
+// The renderizeitor reads its PCX files with fopen: linked with
+// --wrap=fopen, they come from memory too (there is no other file here).
+extern "C" FILE *__wrap_fopen(const char *name, const char *)
+{
+    return data_fopen(name);
+}
+
+// The map's files for the OpenGL renderer: their names, which are all
+// data_fopen needs ("" for a file that is not there).
+MapFiles map_files(const std::string &)
+{
+    MapFiles m;
+    auto find = [](const char *name) { const File *f = find_file(name); return f ? f->name : std::string(); };
+    m.map = find(fname_map);
+    m.col = find(fname_col);
+    m.maptex = find(fname_maptex);
+    m.textures = find(fname_textures);
+    m.fog = find(fname_fog);
+    m.smoke = find(fname_smoke);
+    for (int i = 0; i < world.num_cars; i++) {
+        MapFiles::Car c;
+        c.dat = find(car_dat_name(i));
+        if (!car_get(i).skin.empty())
+            c.pcx = find(car_pcx_name(i));
+        m.cars.push_back(c);
+    }
+    return m;
+}
+
+void web_text(float x, float y, float size, const uint8_t *rgb, const char *text)
+{
+    texts.push_back({ x, y, size, (uint32_t)rgb[0] << 16 | (uint32_t)rgb[1] << 8 | rgb[2], text });
 }
 
 bool host_init_state()
@@ -110,13 +175,12 @@ EXPORT("web_audio_samples") const int16_t *web_audio_samples() { return audio.da
 EXPORT("web_audio_frames") int web_audio_frames() { return (int)(audio.size() / 2); }
 
 // A game on the files added, at a render scale (1..MAX_RENDER_SCALE) and with
-// the extra options (fix_ice_bug, hide_banner).  Returns false if the map
-// cannot be played (no car1.dat...).
-EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner)
+// the extra options (fix_ice_bug, hide_banner), drawn by the game itself or,
+// with gl, by the OpenGL renderer (web_view first).  Returns false if the
+// map cannot be played (no car1.dat...) or the renderer cannot start.
+EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bool gl)
 {
-    if (running)
-        host_free_game();
-    running = false;
+    stop_game();
     render_scale = scale < 1 ? 1 : scale > MAX_RENDER_SCALE ? MAX_RENDER_SCALE : scale;
     extra_options.fix_ice_bug = fix_ice;
     extra_options.hide_banner = hide_banner;
@@ -125,6 +189,12 @@ EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner)
         OPL3_Reset(&chip, audio_rate);  // game_init sets the AdLib up again
     if (game_init() != 0 || world.num_cars <= 0)
         return false;
+    opengl = gl;
+    texts.clear();
+    if (opengl && !opengl_start()) {
+        host_free_game();
+        return false;
+    }
     tick_ms = frame_ms = 0;
     running = true;
     return true;
@@ -132,9 +202,22 @@ EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner)
 
 EXPORT("web_stop") void web_stop()
 {
-    if (running)
-        host_free_game();
-    running = false;
+    stop_game();
+}
+
+// The canvas's size in pixels, for the OpenGL renderer's text (the library
+// asks webgl.js for it itself).
+EXPORT("web_view") void web_view(int w, int h)
+{
+    view_w = w < 1 ? 1 : w;
+    view_h = h < 1 ? 1 : h;
+}
+
+// The OpenGL renderer's draw distance (DRAW_DISTANCE_MIN..MAX tiles): any time.
+EXPORT("web_draw_distance") void web_draw_distance(int tiles)
+{
+    opengl_set_draw_distance(tiles < DRAW_DISTANCE_MIN ? DRAW_DISTANCE_MIN
+                             : tiles > DRAW_DISTANCE_MAX ? DRAW_DISTANCE_MAX : tiles);
 }
 
 // A key: a PC scancode (set 1), | 0x80 when released.
@@ -146,7 +229,8 @@ EXPORT("web_key") void web_key(int scancode)
 
 // ms more of time: the physics ticks and the frames it holds.  Returns the
 // new picture (web_width() x web_height() RGBA pixels), or null when no new
-// frame is due.
+// frame is due.  With the OpenGL renderer the frame is already on the
+// canvas: not null then, with its texts in web_text_*.
 EXPORT("web_advance") const uint32_t *web_advance(double ms)
 {
     if (!running)
@@ -155,8 +239,11 @@ EXPORT("web_advance") const uint32_t *web_advance(double ms)
         ms = 0;                         // the first animation frame can come stamped before the start
     if (ms > 250)
         ms = 250;                       // after a stall (a hidden tab): do not try to catch up
-    for (tick_ms += ms; tick_ms >= 1000.0 / 120; tick_ms -= 1000.0 / 120)
+    for (tick_ms += ms; tick_ms >= 1000.0 / 120; tick_ms -= 1000.0 / 120) {
         physics_tick();
+        if (opengl)
+            opengl_tick();
+    }
     audio.clear();
     if (audio_rate) {                   // the sound of that time (the writes of the last frame)
         audio_due += ms * audio_rate / 1000;
@@ -171,6 +258,13 @@ EXPORT("web_advance") const uint32_t *web_advance(double ms)
     frame_ms -= 1000.0 / 60;
     if (frame_ms > 1000.0 / 60)
         frame_ms = 0;
+    if (opengl) {
+        texts.clear();
+        PictureRect where;
+        opengl_frame(view_w, view_h, &where);
+        static const uint32_t drawn = 0;
+        return &drawn;
+    }
     game_frame();                       // its Esc never comes: the page keeps it
     const int n = screen_w() * screen_h();
     picture.resize((size_t)n);
@@ -181,6 +275,14 @@ EXPORT("web_advance") const uint32_t *web_advance(double ms)
     }
     return picture.data();
 }
+
+// The OpenGL renderer's texts of the last frame (see Text).
+EXPORT("web_text_count") int web_text_count() { return (int)texts.size(); }
+EXPORT("web_text_x") float web_text_x(int i) { return texts[i].x; }
+EXPORT("web_text_y") float web_text_y(int i) { return texts[i].y; }
+EXPORT("web_text_size") float web_text_size(int i) { return texts[i].size; }
+EXPORT("web_text_rgb") uint32_t web_text_rgb(int i) { return texts[i].rgb; }
+EXPORT("web_text_str") const char *web_text_str(int i) { return texts[i].text.c_str(); }
 
 EXPORT("web_width") int web_width() { return screen_w(); }
 EXPORT("web_height") int web_height() { return screen_h(); }

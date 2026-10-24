@@ -1,5 +1,8 @@
 // The web host's page side, an ES module (see web_main.cpp): picks a map folder (read
-// locally, nothing is uploaded), runs the game in terep2.wasm and draws it.
+// locally, nothing is uploaded), runs the game in terep2.wasm and draws it: the game's own
+// picture on a 2D canvas, or the OpenGL renderer's with WebGL 2 (webgl.js) and its text over it.
+import { webglImports } from './webgl.js';
+
 const $ = (id) => document.getElementById(id);
 
 // KeyboardEvent.code -> PC scancode (set 1), as the SDL host's table.
@@ -20,7 +23,8 @@ const SCANCODES = {
     Delete: 0x53,
 };
 
-// The little of WASI the module uses: printing (to the console), nothing else.
+// The little of WASI the module uses: printing (to the console), nothing else
+// (no directories: the files are in the module's memory, see web_main.cpp).
 function wasiImports(getMemory) {
     const lines = { 1: '', 2: '' };
     return {
@@ -41,6 +45,18 @@ function wasiImports(getMemory) {
         },
         fd_close: () => 0,
         fd_seek: () => 70,          // ESPIPE: no files here
+        fd_fdstat_get(fd, p) {      // 1 and 2 are terminals (line by line), nothing else is open
+            if (fd !== 1 && fd !== 2)
+                return 8;           // EBADF
+            const view = new DataView(getMemory().buffer);
+            for (let i = 0; i < 24; i += 4)
+                view.setUint32(p + i, 0, true);
+            view.setUint8(p, 2);    // character device
+            return 0;
+        },
+        fd_prestat_get: () => 8,    // EBADF: no directories
+        fd_prestat_dir_name: () => 8,
+        proc_exit(code) { throw new Error('terep2.wasm exited: ' + code); },
     };
 }
 
@@ -128,11 +144,14 @@ function drawMinimap() {
 let wasm = null;                    // the module's exports
 let maps = new Map();               // folder path -> its File objects
 let playing = false, last = 0;
+let webgl = false;                  // this game is drawn by the OpenGL renderer
 
 async function load() {
     let memory = null;
-    const { instance } = await WebAssembly.instantiateStreaming(fetch('terep2.wasm'),
-        { wasi_snapshot_preview1: wasiImports(() => memory) });
+    const { instance } = await WebAssembly.instantiateStreaming(fetch('terep2.wasm'), {
+        wasi_snapshot_preview1: wasiImports(() => memory),
+        gl: webglImports($('gl'), () => memory),
+    });
     memory = instance.exports.memory;
     instance.exports._initialize();
     wasm = instance.exports;
@@ -186,13 +205,22 @@ async function play(dir) {
     }
     savePrefs();
     wasm.web_audio_start($('sound').checked && audio ? audio.sampleRate : 0);
-    if (!wasm.web_start(+$('scale').value, $('fixice').checked, $('banner').checked)) {
-        alert('This map cannot be played.');
+    webgl = $('renderer').value === 'webgl';
+    $('screen').hidden = webgl;
+    $('gl').hidden = $('overlay').hidden = !webgl;
+    $('chooser').hidden = true;
+    $('game').hidden = false;           // before sizing the canvas
+    if (webgl) {
+        sizeCanvases();
+        wasm.web_draw_distance(+$('distance').value);
+    }
+    if (!wasm.web_start(+$('scale').value, $('fixice').checked, $('banner').checked, webgl)) {
+        $('game').hidden = true;
+        $('chooser').hidden = false;
+        alert(webgl ? 'This map cannot be played, or WebGL 2 is not available.' : 'This map cannot be played.');
         return;
     }
     prepareMinimap();
-    $('chooser').hidden = true;
-    $('game').hidden = false;
     playing = true;
     last = performance.now();
     requestAnimationFrame(frame);
@@ -209,13 +237,46 @@ function stop() {
 
 const picture = document.createElement('canvas');
 
+// The OpenGL renderer's canvas and the text's over it: the whole window, in
+// device pixels.
+function sizeCanvases() {
+    const w = Math.max(1, Math.floor(innerWidth * devicePixelRatio));
+    const h = Math.max(1, Math.floor(innerHeight * devicePixelRatio));
+    for (const c of [$('gl'), $('overlay')])
+        if (c.width !== w || c.height !== h) {
+            c.width = w;
+            c.height = h;
+        }
+    wasm.web_view(w, h);
+}
+
+// The OpenGL renderer's text (game_frame's), over its picture.
+function drawTexts() {
+    const overlay = $('overlay'), ctx = overlay.getContext('2d');
+    ctx.clearRect(0, 0, overlay.width, overlay.height);
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < wasm.web_text_count(); i++) {
+        const size = wasm.web_text_size(i), x = wasm.web_text_x(i), y = wasm.web_text_y(i);
+        ctx.font = `${size}px monospace`;
+        ctx.fillStyle = '#' + wasm.web_text_rgb(i).toString(16).padStart(6, '0');
+        const p = wasm.web_text_str(i), bytes = new Uint8Array(wasm.memory.buffer, p);
+        const text = new TextDecoder().decode(bytes.subarray(0, bytes.indexOf(0)));
+        text.split('\n').forEach((line, k) => ctx.fillText(line, x, y + k * size));
+    }
+}
+
 function frame(now) {
     if (!playing)
         return;
+    if (webgl)
+        sizeCanvases();
     const p = wasm.web_advance(now - last);
     last = now;
     playSamples();
-    if (p) {
+    if (p && webgl) {
+        drawTexts();
+        drawMinimap();
+    } else if (p) {
         const w = wasm.web_width(), h = wasm.web_height();
         if (picture.width !== w || picture.height !== h) {
             picture.width = w;
@@ -255,7 +316,8 @@ function savePrefs() {
     try {
         localStorage.setItem('terep2vibed', JSON.stringify({
             scale: $('scale').value, fixice: $('fixice').checked, banner: $('banner').checked,
-            sound: $('sound').checked, minimap: $('minimapOn').checked }));
+            sound: $('sound').checked, minimap: $('minimapOn').checked, renderer: $('renderer').value,
+            distance: $('distance').value }));
     } catch (e) { /* private mode: not kept */ }
 }
 
@@ -267,6 +329,8 @@ function loadPrefs() {
         if (p.banner !== undefined) $('banner').checked = p.banner;
         if (p.sound !== undefined) $('sound').checked = p.sound;
         if (p.minimap !== undefined) $('minimapOn').checked = p.minimap;
+        if (p.renderer) $('renderer').value = p.renderer;
+        if (p.distance) $('distance').value = p.distance;
     } catch (e) { /* nothing saved */ }
 }
 
@@ -276,5 +340,7 @@ $('folder').onchange = () => {
     maps = findMaps($('folder').files);
     showMaps();
 };
+$('distance').oninput = () => { $('distanceText').textContent = $('distance').value + ' tiles'; };
 loadPrefs();
+$('distance').oninput();
 load().catch((e) => { $('status').textContent = 'Could not load terep2.wasm: ' + e; });
