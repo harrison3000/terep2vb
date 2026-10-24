@@ -1,7 +1,5 @@
-// The web host's page side (see web_main.cpp): picks a map folder (read
+// The web host's page side, an ES module (see web_main.cpp): picks a map folder (read
 // locally, nothing is uploaded), runs the game in terep2.wasm and draws it.
-'use strict';
-
 const $ = (id) => document.getElementById(id);
 
 // KeyboardEvent.code -> PC scancode (set 1), as the SDL host's table.
@@ -44,6 +42,87 @@ function wasiImports(getMemory) {
         fd_close: () => 0,
         fd_seek: () => 70,          // ESPIPE: no files here
     };
+}
+
+// The sound: the AudioWorklet in opl_player.js plays the samples the module
+// makes as the time advances.
+let audio = null, player = null;    // AudioContext, its AudioWorkletNode
+
+// Within the click that starts a game (browsers allow sound only then).
+function startAudio() {
+    if (!audio) {
+        audio = new AudioContext();
+        audio.audioWorklet.addModule('opl_player.js').then(() => {
+            player = new AudioWorkletNode(audio, 'opl-player', { outputChannelCount: [2] });
+            player.connect(audio.destination);
+        }).catch((e) => console.warn('no sound:', e));
+    }
+    audio.resume();
+}
+
+function playSamples() {
+    const n = wasm.web_audio_frames();
+    if (!n || !player)
+        return;
+    const s = new Int16Array(wasm.memory.buffer, wasm.web_audio_samples(), n * 2);
+    const f = new Float32Array(n * 2);
+    for (let i = 0; i < f.length; i++)
+        f[i] = s[i] / 32768;
+    player.port.postMessage(f, [f.buffer]);
+}
+
+// The minimap, in the bottom right corner of the window: the map, and a
+// rectangle per car turned the way it points, a dark dot at its front, its
+// number next to it; the followed car on top.
+const CAR_COLOURS = ['#ff3c3c', '#ffe628', '#3cdcff', '#ff50ff', '#50ff5a', '#ff961e', '#ffffff', '#7878ff'];
+const mapImage = document.createElement('canvas');
+mapImage.width = mapImage.height = 256;
+
+function prepareMinimap() {
+    const p = wasm.web_minimap();
+    const pixels = new Uint8ClampedArray(wasm.memory.buffer, p, 256 * 256 * 4);
+    mapImage.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(pixels), 256, 256), 0, 0);
+}
+
+function drawMinimap() {
+    const mini = $('minimap');
+    if (!$('minimapOn').checked) {
+        mini.hidden = true;
+        return;
+    }
+    mini.hidden = false;
+    const size = Math.round(Math.min(innerWidth, innerHeight) * 0.3);
+    if (mini.width !== size) {
+        mini.width = mini.height = size;
+    }
+    const ctx = mini.getContext('2d'), k = size / 256;
+    ctx.clearRect(0, 0, size, size);
+    ctx.globalAlpha = 0.6;
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(mapImage, 0, 0, size, size);
+    ctx.globalAlpha = 1;
+    const n = wasm.web_car_count(), followed = wasm.web_car_followed();
+    const half = Math.max(size / 80, 1.5);
+    ctx.font = `${Math.max(10, Math.round(size / 18))}px monospace`;
+    for (let j = 1; j <= n; j++) {
+        const i = (followed + j) % n;           // the followed one last
+        const x = wasm.web_car_x(i) * k, y = wasm.web_car_y(i) * k;
+        const a = wasm.web_car_heading(i) * Math.PI / 16;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(a);                          // 0: up the map, clockwise
+        ctx.fillStyle = '#000';
+        ctx.fillRect(-half - 1, -2 * half - 1, 2 * half + 2, 4 * half + 2);
+        ctx.fillStyle = CAR_COLOURS[i % CAR_COLOURS.length];
+        ctx.fillRect(-half, -2 * half, 2 * half, 4 * half);
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(0, -1.2 * half, half * 0.5, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = CAR_COLOURS[i % CAR_COLOURS.length];
+        ctx.fillText(String(i + 1), x + 2.5 * half, y);
+    }
 }
 
 let wasm = null;                    // the module's exports
@@ -92,6 +171,8 @@ function showMaps() {
 
 // Copies the map's files into the module and starts the game.
 async function play(dir) {
+    if ($('sound').checked)
+        startAudio();
     wasm.web_clear_files();
     const enc = new TextEncoder();
     for (const f of maps.get(dir)) {
@@ -104,10 +185,12 @@ async function play(dir) {
         wasm.web_free(pname);
     }
     savePrefs();
+    wasm.web_audio_start($('sound').checked && audio ? audio.sampleRate : 0);
     if (!wasm.web_start(+$('scale').value, $('fixice').checked, $('banner').checked)) {
         alert('This map cannot be played.');
         return;
     }
+    prepareMinimap();
     $('chooser').hidden = true;
     $('game').hidden = false;
     playing = true;
@@ -118,6 +201,8 @@ async function play(dir) {
 function stop() {
     playing = false;
     wasm.web_stop();
+    if (audio)
+        audio.suspend();
     $('game').hidden = true;
     $('chooser').hidden = false;
 }
@@ -129,6 +214,7 @@ function frame(now) {
         return;
     const p = wasm.web_advance(now - last);
     last = now;
+    playSamples();
     if (p) {
         const w = wasm.web_width(), h = wasm.web_height();
         if (picture.width !== w || picture.height !== h) {
@@ -144,6 +230,7 @@ function frame(now) {
         const ctx = screen.getContext('2d');
         ctx.imageSmoothingEnabled = false;
         ctx.drawImage(picture, 0, 0, screen.width, screen.height);
+        drawMinimap();
     }
     requestAnimationFrame(frame);
 }
@@ -167,7 +254,8 @@ function key(e, up) {
 function savePrefs() {
     try {
         localStorage.setItem('terep2vibed', JSON.stringify({
-            scale: $('scale').value, fixice: $('fixice').checked, banner: $('banner').checked }));
+            scale: $('scale').value, fixice: $('fixice').checked, banner: $('banner').checked,
+            sound: $('sound').checked, minimap: $('minimapOn').checked }));
     } catch (e) { /* private mode: not kept */ }
 }
 
@@ -177,6 +265,8 @@ function loadPrefs() {
         if (p.scale) $('scale').value = p.scale;
         if (p.fixice !== undefined) $('fixice').checked = p.fixice;
         if (p.banner !== undefined) $('banner').checked = p.banner;
+        if (p.sound !== undefined) $('sound').checked = p.sound;
+        if (p.minimap !== undefined) $('minimapOn').checked = p.minimap;
     } catch (e) { /* nothing saved */ }
 }
 

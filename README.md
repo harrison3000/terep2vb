@@ -97,7 +97,7 @@ and kept in `extra_options`, which the map chooser shows as checkboxes:
 
 ### In a web page
 
-`make web` builds the game as WebAssembly (`web/terep2.wasm`, about 120 KB: clang for
+`make web` builds the game as WebAssembly (`web/terep2.wasm`, about 160 KB: clang for
 wasm32-wasip1 with the WASI libc and libc++, no Emscripten) with its own small host,
 `web/web_main.cpp`. The page (`web/index.html`, `web/terep2.js`) asks for a folder, finds the maps
 in it and reads their files right there in the browser (nothing is uploaded), then runs the game
@@ -106,8 +106,10 @@ page needs to be served, not opened as a file:
 
     make web && python3 -m http.server -d web
 
-and then http://localhost:8000. For now: the software renderer only, no sound, no map preview;
-Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
+and then http://localhost:8000. The sound is the same AdLib emulation (Nuked-OPL3, in the module
+too, played through an AudioWorklet), and there is the same minimap, in the bottom right corner
+of the window. For now: the software renderer only, no map preview; Esc goes back to the list
+of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
 the replays give the same frames as the Win16 port there too.
 
 ### Higher resolution

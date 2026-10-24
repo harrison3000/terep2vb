@@ -14,6 +14,7 @@
   .small { color: #999; font-size: 0.9em; }
   #game { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }
   #screen { image-rendering: pixelated; }
+  #minimap { position: fixed; right: 2vmin; bottom: 2vmin; }
 </style>
 </head>
 <body>
@@ -29,6 +30,8 @@
     </select></label>
     <label><input type="checkbox" id="fixice" checked> fix-ice-bug</label>
     <label><input type="checkbox" id="banner"> hide-banner</label>
+    <label><input type="checkbox" id="sound" checked> Sound</label>
+    <label><input type="checkbox" id="minimapOn"> Minimap</label>
   </p>
   <div id="maps"></div>
   <p id="none" class="small" hidden>No map found in that folder.</p>
@@ -37,7 +40,7 @@
   F6 second view's camera, F9 split screen, F10 fog, Tab / Q change car, [ ] gravity.
   Esc goes back here.</p>
 </div>
-<div id="game" hidden><canvas id="screen"></canvas></div>
-<script src="terep2.js"></script>
+<div id="game" hidden><canvas id="screen"></canvas><canvas id="minimap"></canvas></div>
+<script type="module" src="terep2.js"></script>
 </body>
 </html>

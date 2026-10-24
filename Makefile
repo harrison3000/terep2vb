@@ -149,10 +149,14 @@ build/wasm/terep2-headless: build/wasm/terep2-headless.wasm tools/wasi_run.mjs
 
 # The web page (web/): the game as a WebAssembly "reactor" for the browser, with web/web_main.cpp
 # as its host.  Serve the folder (python3 -m http.server -d web) and open it.
-WEB_OBJ      := $(patsubst build/%,build/wasm/%,$(GAME_OBJ)) build/wasm/web/web_main.o
-build/wasm/web/%.o: web/%.cpp
+WASM_CC      ?= clang
+WEB_OBJ      := $(patsubst build/%,build/wasm/%,$(GAME_OBJ)) build/wasm/web/web_main.o build/wasm/opl3.o
+build/wasm/web/%.o: web/%.cpp | $(OPL3)/opl3.h
 	@mkdir -p $(@D)
-	$(WASM_CXX) $(WASM_FLAGS) $(DEPFLAGS) -c -o $@ $<
+	$(WASM_CXX) $(WASM_FLAGS) -I$(OPL3) $(DEPFLAGS) -c -o $@ $<
+build/wasm/opl3.o: $(OPL3)/opl3.c | $(OPL3)/opl3.h
+	@mkdir -p $(@D)
+	$(WASM_CC) --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 $(DEPFLAGS) -c -o $@ $<
 web/terep2.wasm: $(WEB_OBJ)
 	$(WASM_CXX) $(WASM_FLAGS) -mexec-model=reactor -Wl,--strip-debug -o $@ $^
 web: web/terep2.wasm
