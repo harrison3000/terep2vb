@@ -2,7 +2,6 @@
  * Bitmap font text.  Each glyph is a list of column bytes (bit 0 = top
  * row) ended by a zero byte, read at startup from src/font.pbm.
  */
-#include <cstdio>
 #include "terep.hpp"
 
 /* The font: src/font.pbm (plain PBM), 5 pixels wide, one 5x5 glyph below
@@ -32,18 +31,16 @@ static const struct Font {
     const char *p = strchr(font_pbm, '\n') + 1;      /* after "P1" */
     while (*p == '#')                                   /* comments */
         p = strchr(p, '\n') + 1;
-    int n;
-    sscanf(p, "%*d %*d%n", &n);                         /* size: 5 x 5 per glyph */
-    p += n;
+    p = strchr(p, '\n') + 1;                            /* the size line: 5 x 5 per glyph */
 
     uint16_t out = 0;
     for (const char *c = font_chars; *c; c++) {
         uint8_t columns[5] = {};
         for (int y = 0; y < 5; y++)
             for (int x = 0; x < 5; x++) {
-                int bit;
-                sscanf(p, " %1d%n", &bit, &n);
-                p += n;
+                while (*p != '0' && *p != '1')          /* spaces and line breaks */
+                    p++;
+                int bit = *p++ != '0';
                 columns[x] |= (uint8_t)(bit << y);
             }
         f.offset[(uint8_t)*c] = out;
