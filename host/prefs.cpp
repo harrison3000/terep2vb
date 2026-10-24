@@ -9,7 +9,7 @@ static std::string saved;              // the file's contents as last read or wr
 
 static std::string prefs_path()
 {
-    char *dir = SDL_GetPrefPath(nullptr, "terep2vibed");
+    char *dir = SDL_GetPrefPath(nullptr, "terep2vb");
     if (!dir)
         return "";
     std::string path = std::string(dir) + "prefs.txt";

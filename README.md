@@ -16,16 +16,16 @@ that corrupts the title) and a crash of the original that the port does not repr
 ## Building and running
 
 ```sh
-git submodule update --init   # Dear ImGui and Nuked-OPL3 (host/imgui, host/Nuked-OPL3), for terep2vibed
+git submodule update --init   # Dear ImGui and Nuked-OPL3 (host/imgui, host/Nuked-OPL3), for terep2vb
 make            # terep2-headless: test host, no dependencies
-make sdl        # terep2vibed: playable SDL2 + OpenGL 3.3 version (needs libsdl2-dev, OpenGL and the submodules)
+make sdl        # terep2vb: playable SDL2 + OpenGL 3.3 version (needs libsdl2-dev, OpenGL and the submodules)
 make test       # replays the Win16 recordings in tests/ and compares the frames
 make -j8 all sdl  # in parallel: each source is its own object in build/, rebuilt when its headers change
 make coverage  # which lines of src/ the tests run (clang/LLVM): summary, and build/cov/html
 make coverage REPLAY="rec/dir data/Map"  # the same for one recording only
 make wasm-test  # the test host built for WebAssembly (wasm32-wasip1: clang + wasi-libc/libc++, no Emscripten), replays run with node
-./terep2vibed              # opens the map chooser where the last map was chosen
-./terep2vibed data/Asphalt # opens it with that map selected
+./terep2vb                 # opens the map chooser where the last map was chosen
+./terep2vb data/Asphalt    # opens it with that map selected
 ```
 
 C++17 with GNU extensions (`__attribute__((packed))` for the PCX header, `-fwrapv` and `#embed`), so it builds with
@@ -57,7 +57,7 @@ its reference point is; x is to the right and y down, so a camera turned to yaw 
 minimap. It is drawn over the game's picture through ImGui (`host/minimap.cpp`), so the
 game's picture and the tests do not change.
 
-`terep2vibed` opens a map chooser (Dear ImGui): the directories on the left, starting where
+`terep2vb` opens a map chooser (Dear ImGui): the directories on the left, starting where
 the last map was chosen, or at the map directory given on the command line (its only argument),
 with that map selected (`[map]` marks those with a `map.pcx` and a
 `col.pcx`); on the right a preview of the selected map, its terrain turning, drawn with the
@@ -70,7 +70,7 @@ does not touch the game code.
 
 The chooser's choices (scale, minimap, sound, extra options and the last map) are
 kept in `prefs.txt`, one `key: value` per line, in SDL's preference directory
-(`~/.local/share/terep2vibed` on Linux, `%APPDATA%\terep2vibed` on Windows). They are read when the
+(`~/.local/share/terep2vb` on Linux, `%APPDATA%\terep2vb` on Windows). They are read when the
 chooser opens and written when a game starts, only if something changed.
 
 Extra options are fixes of bugs of the original, or other changes to what it does; without

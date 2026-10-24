@@ -2,7 +2,7 @@
  * SDL2 host: a window, the keyboard and the original timing (physics at
  * 120 Hz, display at 60 Hz, as in the Win16 port).
  *
- *   terep2vibed [mapdir]
+ *   terep2vb [mapdir]
  *
  * Opens the map chooser (launcher.cpp) with the saved preferences
  * (prefs.hpp), at mapdir with it selected if given, else where the last map

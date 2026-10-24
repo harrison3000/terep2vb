@@ -311,7 +311,7 @@ function key(e, up) {
 
 function savePrefs() {
     try {
-        localStorage.setItem('terep2vibed', JSON.stringify({
+        localStorage.setItem('terep2web', JSON.stringify({
             scale: $('scale').value, fixice: $('fixice').checked, banner: $('banner').checked,
             sound: $('sound').checked, minimap: $('minimapOn').checked, renderer: $('renderer').value,
             distance: $('distance').value }));
@@ -320,7 +320,7 @@ function savePrefs() {
 
 function loadPrefs() {
     try {
-        const p = JSON.parse(localStorage.getItem('terep2vibed') || '{}');
+        const p = JSON.parse(localStorage.getItem('terep2web') || '{}');
         if (p.scale) $('scale').value = p.scale;
         if (p.fixice !== undefined) $('fixice').checked = p.fixice;
         if (p.banner !== undefined) $('banner').checked = p.banner;
