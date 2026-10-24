@@ -218,6 +218,7 @@ async function play(dir) {
         return;
     }
     prepareMinimap();
+    camera = 3;                         // a new game starts on the chase camera
     playing = true;
     last = performance.now();
     requestAnimationFrame(frame);
@@ -330,6 +331,46 @@ function loadPrefs() {
         if (p.renderer) $('renderer').value = p.renderer;
         if (p.distance) $('distance').value = p.distance;
     } catch (e) { /* nothing saved */ }
+}
+
+// On a touch screen: buttons for car 1 (the arrows' and keypad 5's scancodes,
+// and 1 / 2, which jump to turn a car over), one that goes through the
+// cameras F1..F5, and one that goes back to the maps (there is no Esc).
+const touchScreen = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+let camera = 3;                     // the F key of the camera last asked for, 0 = F1 (F4: chase, the default)
+
+function holdButton(b, press, release) {
+    b.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        b.setPointerCapture(e.pointerId);
+        b.classList.add('down');
+        if (playing)
+            press();
+    });
+    const up = () => {
+        if (!b.classList.contains('down'))
+            return;
+        b.classList.remove('down');
+        if (playing)
+            release();
+    };
+    b.addEventListener('pointerup', up);
+    b.addEventListener('pointercancel', up);
+    b.addEventListener('contextmenu', (e) => e.preventDefault());   // long press
+}
+
+if (touchScreen) {
+    document.body.classList.add('touch');
+    $('touch').hidden = false;
+    for (const b of document.querySelectorAll('#touch [data-sc]')) {
+        const sc = +b.dataset.sc;
+        holdButton(b, () => wasm.web_key(sc), () => wasm.web_key(sc | 0x80));
+    }
+    holdButton($('camera'), () => {
+        camera = (camera + 1) % 5;
+        wasm.web_key(0x3b + camera);
+    }, () => wasm.web_key((0x3b + camera) | 0x80));
+    $('back').addEventListener('click', () => { if (playing) stop(); });
 }
 
 addEventListener('keydown', (e) => key(e, false));

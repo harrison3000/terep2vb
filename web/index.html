@@ -16,6 +16,22 @@
   #screen { image-rendering: pixelated; }
   #gl, #overlay { position: fixed; inset: 0; width: 100vw; height: 100vh; }
   #minimap { position: fixed; right: 2vmin; bottom: 2vmin; }
+  /* On a touch screen: car 1's controls over the game, the minimap at the top */
+  #touch { position: fixed; inset: 0; pointer-events: none; user-select: none; -webkit-user-select: none; }
+  #touch button { position: absolute; pointer-events: auto; touch-action: none; width: 16vmin; height: 16vmin;
+    min-width: 56px; min-height: 56px; border: 2px solid #fff6; border-radius: 50%; background: #0006;
+    color: #fffc; font: bold 4vmin system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
+  #touch button.down { background: #fff4; }
+  #touch .left  { left: 3vmin;  bottom: 6vmin; }
+  #touch .right { left: 22vmin; bottom: 6vmin; }
+  #touch .gas   { right: 3vmin;  bottom: 22vmin; }
+  #touch .brake { right: 3vmin;  bottom: 3vmin; }
+  #touch .hand  { right: 22vmin; bottom: 3vmin; }
+  #touch .jump1 { left: 3vmin;  top: 3vmin; }
+  #touch .jump2 { left: 22vmin; top: 3vmin; }
+  #touch .cam   { right: 3vmin; top: 3vmin; }
+  #touch .back  { left: 50%; top: 3vmin; transform: translateX(-50%); width: 11vmin; height: 11vmin; }
+  body.touch #minimap { bottom: auto; top: 22vmin; }
 </style>
 </head>
 <body>
@@ -47,11 +63,22 @@
   <p id="status" class="small"></p>
   <p class="small">Keys: arrows + keypad 5 drive car 1 (W Z A D S car 2...), 1 / 2 jump, F1–F5 cameras,
   F6 second view's camera, F9 split screen, F10 fog, Tab / Q change car, [ ] gravity.
-  Esc goes back here. With OpenGL: keypad + − / * move the chase camera; the render scale and the
+  Esc goes back here (on a touch screen: the buttons on the screen drive car 1, ✕ goes back). With OpenGL: keypad + − / * move the chase camera; the render scale and the
   split screen are the software renderer's; the draw distance is OpenGL's.</p>
 </div>
 <div id="game" hidden><canvas id="screen"></canvas><canvas id="gl"></canvas><canvas id="overlay"></canvas>
-  <canvas id="minimap"></canvas></div>
+  <canvas id="minimap"></canvas>
+  <div id="touch" hidden>
+    <button class="left" data-sc="75" aria-label="Left">◀</button>
+    <button class="right" data-sc="77" aria-label="Right">▶</button>
+    <button class="gas" data-sc="72" aria-label="Accelerate">▲</button>
+    <button class="brake" data-sc="80" aria-label="Brake">▼</button>
+    <button class="hand" data-sc="76" aria-label="Handbrake">✋</button>
+    <button class="jump1" data-sc="2" aria-label="Jump (1)">1</button>
+    <button class="jump2" data-sc="3" aria-label="Jump (2)">2</button>
+    <button class="cam" id="camera" aria-label="Next camera">🎥</button>
+    <button class="back" id="back" aria-label="Back to the maps">✕</button>
+  </div></div>
 <script type="module" src="terep2.js"></script>
 </body>
 </html>
