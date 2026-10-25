@@ -45,9 +45,11 @@
   <p><input type="file" id="folder" webkitdirectory multiple></p>
   <p class="options">
     <label>Renderer <select id="renderer">
-      <option value="software">Software (the original's)</option>
-      <option value="webgl">OpenGL (WebGL 2)</option>
+      <option value="webgl">WebGL</option>
+      <option value="software">Software (the original)</option>
     </select></label>
+  </p>
+  <p class="options">
     <label class="gl-only">Quality <select id="quality">
       <option value="high">High</option>
       <option value="medium">Medium (one shadow map, 3/4 resolution)</option>
@@ -62,6 +64,8 @@
       <option value="1">1x (the original)</option><option value="2">2x</option>
       <option value="3" selected>3x</option><option value="4">4x</option>
     </select></label>
+  </p>
+  <p class="options">
     <label><input type="checkbox" id="fixice" checked> fix-ice-bug</label>
     <label><input type="checkbox" id="banner"> hide-banner</label>
     <label><input type="checkbox" id="sound" checked> Sound</label>

@@ -270,6 +270,8 @@ function stop() {
         gl.clearColor(0, 0, 0, 1);
         gl.clear(gl.COLOR_BUFFER_BIT);
     }
+    if (player)                         // what was queued would play at the start of the next game
+        player.port.postMessage(null);
     if (audio)
         audio.suspend();
     $('game').hidden = true;

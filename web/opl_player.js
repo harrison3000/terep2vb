@@ -1,13 +1,19 @@
 // The sound's AudioWorklet (see terep2.js): plays the samples the game's
 // module makes as the time advances, queued; drops the oldest past a quarter
 // of a second (the page's clock and the sound card's drift apart), plays
-// silence when none are left.  Messages: Float32Array, stereo interleaved.
+// silence when none are left.  Messages: Float32Array, stereo interleaved;
+// null drops all those queued (the game stopped).
 class OplPlayer extends AudioWorkletProcessor {
     constructor() {
         super();
         this.queue = [];
         this.pos = 0;
         this.port.onmessage = (e) => {
+            if (!e.data) {
+                this.queue = [];
+                this.pos = 0;
+                return;
+            }
             this.queue.push(e.data);
             let frames = -this.pos / 2;
             for (const b of this.queue) frames += b.length / 2;
