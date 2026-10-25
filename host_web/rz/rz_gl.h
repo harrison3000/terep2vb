@@ -29,7 +29,6 @@ constexpr GLenum GL_BACK                    = 0x0405;
 constexpr GLenum GL_CCW                     = 0x0901;
 constexpr GLenum GL_CULL_FACE               = 0x0B44;
 constexpr GLenum GL_DEPTH_TEST              = 0x0B71;
-constexpr GLenum GL_SCISSOR_TEST            = 0x0C11;
 constexpr GLenum GL_LEQUAL                  = 0x0203;
 constexpr GLenum GL_LESS                    = 0x0201;
 constexpr GLenum GL_UNPACK_ALIGNMENT        = 0x0CF5;
@@ -93,7 +92,6 @@ RZ_GL(glColorMask)      void glColorMask(GLboolean r, GLboolean g, GLboolean b, 
 RZ_GL(glDepthMask)      void glDepthMask(GLboolean flag);
 RZ_GL(glPolygonOffset)  void glPolygonOffset(GLfloat factor, GLfloat units);
 RZ_GL(glViewport)       void glViewport(GLint x, GLint y, GLsizei w, GLsizei h);
-RZ_GL(glScissor)        void glScissor(GLint x, GLint y, GLsizei w, GLsizei h);
 RZ_GL(glClearColor)     void glClearColor(GLfloat r, GLfloat g, GLfloat b, GLfloat a);
 RZ_GL(glClear)          void glClear(GLbitfield mask);
 RZ_GL(glEnable)         void glEnable(GLenum cap);

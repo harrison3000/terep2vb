@@ -166,7 +166,6 @@ constexpr float   kCascadeSplit1        = 30.0f;
 constexpr float   kCascadeBlend         = 2.0f;   // tiles de transição antes de cada divisa
 constexpr float   kCascadeFarRecenter   = 10.0f;  // tiles andados até refazer a cascata 2
 constexpr float   kCascadeFarMargin     = 4.0f;   // tiles além da neblina + recentragem
-constexpr int32_t kShadowScissorMargin  = 4;     // texels em volta da área refeita da cascata 2
 constexpr int32_t kUnitShadow           = 1;      // unidade de textura das sombras (0: atlas/objeto)
 // Posições e índices de cada objeto num uniform block (ObjectData, nos
 // shaders object.vert e object_depth.vert, layout std140): kMaxObjectVertices
@@ -523,9 +522,7 @@ struct RzContext {
     int32_t    shadowSize = 0;                       // lado dos mapas (já limitado pelo driver)
     int32_t    cascades = rz::kShadowMaps;           // 3, ou 1 (mais leve): camadas e FBOs
     float      shadowReach = rz::kCascadeSplit1;     // tiles: até onde vão as cascatas 0 e 1 (com 1, a única)
-    bool       terrainShadowDirty = true;            // terreno mudou: cascata 2 refeita...
-    bool       terrainShadowAll   = true;            // ...inteira, ou só a caixa abaixo (mundo)
-    rz::Vec3   terrainShadowLo = { 0.0f, 0.0f, 0.0f }, terrainShadowHi = { 0.0f, 0.0f, 0.0f };
+    bool       terrainShadowDirty = true;            // terreno novo (carga): cascata 2 refeita
     bool       cascadeFarValid = false;              // cascata 2 desenhada para o modo atual
     bool       cascadeFarOverview = false;           // ...na visão geral (terreno inteiro + objetos)
     rz::Vec3   cascadeFarCenter = { 0.0f, 0.0f, 0.0f };   // olho quando a cascata 2 foi refeita
@@ -690,8 +687,7 @@ bool createShadowMaps(RzContext* ctx);
 void destroyShadowMaps(RzContext* ctx);
 void renderShadowMaps(RzContext* ctx);
 void initShadowUniforms(GLuint program, ShadowUniforms& u);
-void markTerrainShadowAll(RzContext* ctx);                     // mapa 0 inteiro no próximo frame
-void markTerrainShadowBox(RzContext* ctx, Vec3 lo, Vec3 hi);   // só a caixa (mundo), acumulando
+void markTerrainShadowAll(RzContext* ctx);                     // cascata 2 refeita no próximo frame
 void bindShadowMaps(const RzContext* ctx, const ShadowUniforms& u);
 
 // rz_border.cpp

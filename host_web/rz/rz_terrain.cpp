@@ -314,15 +314,15 @@ bool rebuildTerrainTiles(RzContext* ctx) {
 // rzUpdateTerrain: relê os buffers do host (ponteiros guardados), compara com
 // as cópias e, para cada ponto/quad que mudou (no jogo são poucos):
 //   - altura: refaz e reenvia os 4 quads em volta do ponto, atualiza a cópia
-//     estendida (câmera) e marca a sombra do relevo só ali (com as alturas
-//     antiga e nova); se o ponto é da borda do mapa, só move junto o y das
-//     vértices do terreno de fora que estão em cima dele (moveSkirtEdgeVertex;
+//     estendida (câmera) e a faixa de alturas dos blocos do ponto (a sombra
+//     de longe não é refeita: ver rz_shadow.cpp); se o ponto é da borda do
+//     mapa, só move junto o y das vértices do terreno de fora que estão em
+//     cima dele (moveSkirtEdgeVertex;
 //     o resto de fora não é recalculado: aceito, rzSetHeightmap refaz tudo);
 //   - bloco: refaz e reenvia o quad; se está a menos de kSkirtTileBand quads
 //     da borda, refaz a malha da continuação (ela copia/sorteia dessa faixa).
 // Sem mudança, não faz nada. Não aloca.
 bool updateTerrain(RzContext* ctx) {
-    const float cs = ctx->cellSize, hs = ctx->heightScale;
     auto refreshQuads = [&](int32_t c0, int32_t r0, int32_t c1, int32_t r1) {   // inclusivos, recortados
         if (c0 < 0) c0 = 0;
         if (r0 < 0) r0 = 0;
@@ -338,7 +338,6 @@ bool updateTerrain(RzContext* ctx) {
         for (int32_t i = 0; i < kVertexCount; ++i) {
             if (src[i] == h[i]) continue;
             const int32_t gc = i % kGridSize, gr = i / kGridSize;
-            const float yOld = float(h[i]) * hs, yNew = float(src[i]) * hs;
             h[i] = src[i];
             setExtendedHeight(ctx, gc, gr, float(src[i]));
             refreshQuads(gc - 1, gr - 1, gc, gr);
@@ -347,19 +346,6 @@ bool updateTerrain(RzContext* ctx) {
                 for (int32_t cx = (gc - 1) / kChunkQuads; cx <= gc / kChunkQuads; ++cx)
                     if (cx >= 0 && cz >= 0 && cx < kChunksPerSide && cz < kChunksPerSide) chunkBounds(ctx, cx, cz);
             if (gc == 0 || gr == 0 || gc == kQuadsPerSide || gr == kQuadsPerSide) moveSkirtEdgeVertex(ctx, gc, gr);
-            // sombra: caixa dos quads em volta (1 tile para cada lado), com a
-            // altura antiga, a nova e a dos 8 vizinhos
-            float lo = yOld < yNew ? yOld : yNew, hi = yOld < yNew ? yNew : yOld;
-            for (int32_t dr = -1; dr <= 1; ++dr)
-                for (int32_t dc = -1; dc <= 1; ++dc) {
-                    const int32_t c = gc + dc, r = gr + dr;
-                    if (c < 0 || r < 0 || c > kQuadsPerSide || r > kQuadsPerSide) continue;
-                    const float y = float(h[r * kGridSize + c]) * hs;
-                    if (y < lo) lo = y;
-                    if (y > hi) hi = y;
-                }
-            markTerrainShadowBox(ctx, { float(gc - 1) * cs, lo, float(gr - 1) * cs },
-                                      { float(gc + 1) * cs, hi, float(gr + 1) * cs });
         }
     }
     if (ctx->tileSource && ctx->hasTileMap) {

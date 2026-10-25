@@ -76,7 +76,6 @@ export function webglImports(canvas, getMemory) {
         glDepthMask: (flag) => gl.depthMask(!!flag),
         glPolygonOffset: (factor, units) => gl.polygonOffset(factor, units),
         glViewport: (x, y, w, h) => gl.viewport(x, y, w, h),
-        glScissor: (x, y, w, h) => gl.scissor(x, y, w, h),
         glClearColor: (r, g, b, a) => gl.clearColor(r, g, b, a),
         glClear: (mask) => gl.clear(mask),
         glEnable: (cap) => gl.enable(cap),

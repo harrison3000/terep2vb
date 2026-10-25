@@ -14,11 +14,12 @@
 // terreno que caem na caixa são desenhados (drawTerrain).
 // A 2 é um quadrado em volta do olho (meia-largura = fim da neblina +
 // recentragem + margem), desenhado só quando o olho anda kCascadeFarRecenter
-// tiles desde o último desenho, a neblina muda de tamanho ou o terreno muda
-// (terrainShadowDirty: inteira na carga, markTerrainShadowAll; em
-// rzUpdateTerrain, só o retângulo onde cai a caixa alterada,
-// markTerrainShadowBox, com scissor). Objetos além de kCascadeSplit1 não
-// projetam sombra (aceito: a neblina começa logo depois).
+// tiles desde o último desenho, a neblina muda de tamanho ou um terreno novo
+// é carregado (markTerrainShadowAll). O gelo que quebra (rzUpdateTerrain) não
+// a refaz: quebra perto de um carro, que usa as cascatas 0 e 1, refeitas todo
+// frame; de longe a diferença não aparece, e a próxima recentragem já a
+// inclui. Objetos além de kCascadeSplit1 não projetam sombra (aceito: a
+// neblina começa logo depois).
 //
 // O shader escolhe a cascata pela distância ao olho, com uma faixa de
 // kCascadeBlend tiles antes de cada divisa misturando as duas vizinhas. Fora
@@ -147,24 +148,6 @@ bool createShadowMaps(RzContext* ctx) {
 
 void markTerrainShadowAll(RzContext* ctx) {
     ctx->terrainShadowDirty = true;
-    ctx->terrainShadowAll = true;
-}
-
-// Acumula (união) até o próximo frame. As alturas antigas entram na caixa:
-// um morro que baixou também apaga a profundidade de onde ele estava.
-void markTerrainShadowBox(RzContext* ctx, Vec3 lo, Vec3 hi) {
-    if (ctx->terrainShadowDirty) {
-        if (ctx->terrainShadowAll) return;
-        Vec3& a = ctx->terrainShadowLo;
-        Vec3& b = ctx->terrainShadowHi;
-        a = { fminf(a.x, lo.x), fminf(a.y, lo.y), fminf(a.z, lo.z) };
-        b = { fmaxf(b.x, hi.x), fmaxf(b.y, hi.y), fmaxf(b.z, hi.z) };
-        return;
-    }
-    ctx->terrainShadowDirty = true;
-    ctx->terrainShadowAll = false;
-    ctx->terrainShadowLo = lo;
-    ctx->terrainShadowHi = hi;
 }
 
 void destroyShadowMaps(RzContext* ctx) {
@@ -206,7 +189,6 @@ void renderShadowMaps(RzContext* ctx) {
         ctx->cascadeFarValid = true;
         ctx->cascadeFarOverview = true;
         ctx->terrainShadowDirty = false;
-        ctx->terrainShadowAll = false;
         ctx->shadowMatrix[0] = ctx->shadowMatrix[1] = ctx->shadowMatrix[2];
         ctx->shadowTexel[0] = ctx->shadowTexel[1] = ctx->shadowTexel[2] = 2.0f * radius / float(ctx->shadowSize);
         glDisable(GL_POLYGON_OFFSET_FILL);
@@ -240,7 +222,6 @@ void renderShadowMaps(RzContext* ctx) {
         ctx->shadowTexel[1] = ctx->shadowTexel[2] = ctx->shadowTexel[0];
         ctx->cascadeFarValid = false;
         ctx->terrainShadowDirty = false;
-        ctx->terrainShadowAll = false;
         glDisable(GL_POLYGON_OFFSET_FILL);
         return;
     }
@@ -253,12 +234,11 @@ void renderShadowMaps(RzContext* ctx) {
     const float dx = ctx->eyePos.x - ctx->cascadeFarCenter.x, dz = ctx->eyePos.z - ctx->cascadeFarCenter.z;
     const float recenter = kCascadeFarRecenter * cs;
     // recentra quando o olho andou demais, a neblina mudou ou vem da visão
-    // geral; terreno todo novo só redesenha (no mesmo centro: a grade de
+    // geral; terreno novo (carga) só redesenha (no mesmo centro: a grade de
     // texels não pula)
     const bool moveBox = !ctx->cascadeFarValid || ctx->cascadeFarOverview || farHalf != ctx->cascadeFarHalf ||
                          dx * dx + dz * dz > recenter * recenter;
-    const bool redrawAll = moveBox || (ctx->terrainShadowDirty && ctx->terrainShadowAll);
-    if (redrawAll) {
+    if (moveBox || ctx->terrainShadowDirty) {
         if (moveBox) {
             ctx->cascadeFarCenter = ctx->eyePos;
             ctx->cascadeFarHalf = farHalf;
@@ -270,35 +250,8 @@ void renderShadowMaps(RzContext* ctx) {
         drawTerrainDepth(ctx, ctx->shadowMatrix[2]);
         ctx->cascadeFarValid = true;
         ctx->cascadeFarOverview = false;
-    } else if (ctx->terrainShadowDirty) {
-        // rzUpdateTerrain: só o retângulo de texels onde a caixa alterada cai
-        // (8 cantos) + folga para o PCF e o polygon offset
-        const Mat4& m = ctx->shadowMatrix[2];
-        const int32_t size = ctx->shadowSize;
-        float x0 = 1.0e30f, y0 = 1.0e30f, x1 = -1.0e30f, y1 = -1.0e30f;
-        for (int32_t k = 0; k < 8; ++k) {
-            const Vec3 p = { (k & 1) ? ctx->terrainShadowHi.x : ctx->terrainShadowLo.x,
-                             (k & 2) ? ctx->terrainShadowHi.y : ctx->terrainShadowLo.y,
-                             (k & 4) ? ctx->terrainShadowHi.z : ctx->terrainShadowLo.z };
-            const float sx = (m[0, 0] * p.x + m[0, 1] * p.y + m[0, 2] * p.z + m[0, 3]) * 0.5f + 0.5f;
-            const float sy = (m[1, 0] * p.x + m[1, 1] * p.y + m[1, 2] * p.z + m[1, 3]) * 0.5f + 0.5f;
-            x0 = fminf(x0, sx); x1 = fmaxf(x1, sx);
-            y0 = fminf(y0, sy); y1 = fmaxf(y1, sy);
-        }
-        const int32_t ix0 = int32_t(floorf(x0 * float(size))) - kShadowScissorMargin;
-        const int32_t iy0 = int32_t(floorf(y0 * float(size))) - kShadowScissorMargin;
-        const int32_t ix1 = int32_t(ceilf(x1 * float(size))) + kShadowScissorMargin;
-        const int32_t iy1 = int32_t(ceilf(y1 * float(size))) + kShadowScissorMargin;
-        if (ix1 > 0 && iy1 > 0 && ix0 < size && iy0 < size) {   // fora da cascata: nada a fazer
-            glEnable(GL_SCISSOR_TEST);
-            glScissor(ix0, iy0, ix1 - ix0, iy1 - iy0);
-            beginPass(ctx, 2, ctx->shadowMatrix[2]);             // o clear respeita o scissor
-            drawTerrainDepth(ctx, ctx->shadowMatrix[2]);
-            glDisable(GL_SCISSOR_TEST);
-        }
     }
     ctx->terrainShadowDirty = false;
-    ctx->terrainShadowAll = false;
 
     glDisable(GL_POLYGON_OFFSET_FILL);
 }
