@@ -257,6 +257,7 @@ async function loadGame(dir) {
     camera = 3;                         // a new game starts on the chase camera
     playing = true;
     last = performance.now();
+    frameskip = webgl && $('frameskip').checked;
     textsShown = '';
     requestAnimationFrame(frame);
 }
@@ -331,9 +332,20 @@ function drawTexts() {
     }
 }
 
+// Frameskip (OpenGL, its option): the module is advanced every other
+// animation frame, by the time of both, so a frame is drawn every other one
+// (30 Hz on a 60 Hz screen); the physics stays at 120 Hz.
+let frameskip = false, skipNext = false;
+
 function frame(now) {
     if (!playing)
         return;
+    requestAnimationFrame(frame);
+
+    skipNext = frameskip && !skipNext;
+    if (skipNext) {                     // frameskip: this one's time goes with the next
+        return;
+    }
     const drawn = wasm.web_advance(now - last);
     last = now;
     playSamples();
@@ -360,7 +372,6 @@ function frame(now) {
         ctx.drawImage(picture, 0, 0, screen.width, screen.height);
         drawMinimap();
     }
-    requestAnimationFrame(frame);
 }
 
 function key(e, up) {
@@ -384,7 +395,7 @@ function savePrefs() {
         localStorage.setItem('terep2web', JSON.stringify({
             scale: $('scale').value, fixice: $('fixice').checked, banner: $('banner').checked,
             sound: $('sound').checked, minimap: $('minimapOn').checked, renderer: $('renderer').value,
-            quality: $('quality').value,
+            quality: $('quality').value, frameskip: $('frameskip').checked,
             distance: $('distance').value }));
     } catch (e) { /* private mode: not kept */ }
 }
@@ -399,6 +410,7 @@ function loadPrefs() {
         if (p.minimap !== undefined) $('minimapOn').checked = p.minimap;
         if (p.renderer) $('renderer').value = p.renderer;
         if (p.quality) $('quality').value = p.quality;
+        if (p.frameskip !== undefined) $('frameskip').checked = p.frameskip;
         if (p.distance) $('distance').value = p.distance;
     } catch (e) { /* nothing saved */ }
 }
