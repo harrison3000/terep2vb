@@ -151,7 +151,7 @@ bool gl_start(int width, int height, int quality)
         return false;
     // the map's layers: height and tile, 256 x 256, change while playing;
     // the tiles before the heights, so the terrain's mesh is built once
-    rzSetTerrainScale(ctx, 1.0f, 16.0f/255.5f);
+    rzSetTerrainScale(ctx, 1.0f, 16.0f/256.0f);
     int32_t size;
     const uint8_t *maptex = web_file(fname_maptex, &size);
     rzLoadTileAtlas(ctx, maptex, size);
@@ -382,8 +382,10 @@ static void updateCars(){
         if (cam_internal() && cam_filter.ready && ci == world.player_car[0])
             ptrs[carros[ci].camera_pt] = rz(cam_filter.pos);
 
-        //TODO review this constant, the limits are 45 deg
-        float steering = (float)car.steer.raw * -0.0001f;
+        // the steering latched for the tick (what the game draws, see
+        // steered_axle): an Angle, 0x10000 a turn, positive to the right;
+        // rz takes radians, positive to the left
+        float steering = (float)car.steer_used.raw * (-6.28318531f / 65536.0f);
         rzUpdateObjectWheels(ctx, id, steering);
 
         float spd = F_8_24(car.wheel_speed[0]);
@@ -491,7 +493,10 @@ static void loadCar(int i){
 
             wee[widx].hubVertex = pi;
             wee[widx].front = p.wheel != 1;
-            wee[widx].diameter = (float)p.radius / 150.0f;
+            // radius: the point's against the ground (where the tyre touches), in
+            // map units, 256 a tile: 2 * radius / 256, but over 127, a hair
+            // bigger, so the tyre sinks into the ground rather than float
+            wee[widx].diameter = (float)p.radius / 127.0f;
 
             if(widx == 0){
                 F_UV(f.u0, f.v0, w.views[0].uv[0]);
