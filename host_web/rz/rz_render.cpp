@@ -250,8 +250,7 @@ void renderFrame(RzContext* ctx) {
 
         glEnable(GL_CULL_FACE);                   // terreno: só a face de cima
         glCullFace(GL_BACK);
-        glBindVertexArray(ctx->terrainVao);
-        glDrawArrays(GL_TRIANGLES, 0, kTriangleCount * 3);
+        drawTerrain(ctx, viewProj, ctx->fogOn);   // só os blocos na tela e antes do fim da neblina
         drawSkirt(ctx);                           // continuação além do mapa (com neblina)
     }
 

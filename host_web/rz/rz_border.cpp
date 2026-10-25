@@ -419,10 +419,21 @@ void drawSkirt(const RzContext* ctx) {
     }
 }
 
-void drawSkirtDepth(const RzContext* ctx) {
+void drawSkirtDepth(const RzContext* ctx, const Mat4& matrix) {
     if (ctx->skirtVertexCount == 0) return;
+    const float cs = ctx->cellSize;
+    const float lo = float(-kSkirtExtent) * cs, hi = float(kQuadsPerSide + kSkirtExtent) * cs;
+    const float m0 = 0.0f, m1 = float(kQuadsPerSide) * cs;
+    const float rect[4][4] = { { lo, hi, lo, m0 }, { m1, hi, m0, m1 },     // como em drawSkirt
+                               { lo, hi, m1, hi }, { lo, m0, m0, m1 } };
+    const Frustum f = frustumOf(matrix);
     glBindVertexArray(ctx->skirtVao);
-    glDrawArrays(GL_TRIANGLES, 0, ctx->skirtVertexCount);
+    for (int32_t i = 0; i < 4; ++i) {           // alturas de fora: 0..255 (buildExtendedHeights)
+        if (ctx->skirtCount[i] == 0 ||
+            !boxInFrustum(f, { rect[i][0], 0.0f, rect[i][2] }, { rect[i][1], 255.0f * ctx->heightScale, rect[i][3] }))
+            continue;
+        glDrawArrays(GL_TRIANGLES, ctx->skirtFirst[i], ctx->skirtCount[i]);
+    }
 }
 
 // Parede: depois de tudo que é opaco

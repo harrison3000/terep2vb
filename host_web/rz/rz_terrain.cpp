@@ -176,10 +176,53 @@ void buildPalette(uint32_t* palette) {
 //   A = (c, r), (c, r+1), (c+1, r)      B = (c+1, r), (c, r+1), (c+1, r+1)
 // Cor flat: paleta pela soma das 3 alturas, iluminada pela normal da face.
 // u ao longo da coluna, v ao longo da linha; bloco do quad pelo mapa de blocos.
-// A malha inteira fica também na CPU (ctx->terrainStaging, row-major, 6
-// vértices por quad), para rzUpdateTerrain refazer só um retângulo de quads
-// e reenviar só a faixa de linhas dele.
+// Ordem no VBO: em blocos de kChunkQuads x kChunkQuads quads (row-major),
+// cada bloco contíguo e com os quads dele row-major, 6 vértices por quad; o
+// recorte (drawTerrain) desenha só os blocos que aparecem. A malha inteira
+// fica também na CPU (ctx->terrainStaging, na mesma ordem), para
+// rzUpdateTerrain refazer só um retângulo de quads e reenviar só os trechos dele.
 namespace {
+
+int32_t chunkWidth(int32_t chunk) {          // quads do bloco num eixo (o último é menor)
+    const int32_t rest = kQuadsPerSide - chunk * kChunkQuads;
+    return rest < kChunkQuads ? rest : kChunkQuads;
+}
+
+// Primeiro vértice do quad (c, r) no VBO
+size_t quadVertex(const RzContext* ctx, int32_t c, int32_t r) {
+    const int32_t cx = c / kChunkQuads, cz = r / kChunkQuads;
+    const RzContext::TerrainChunk& k = ctx->terrainChunks[cz * kChunksPerSide + cx];
+    return size_t(k.first) + size_t((r % kChunkQuads) * chunkWidth(cx) + c % kChunkQuads) * 6;
+}
+
+// Onde cada bloco começa no VBO (fixo: só depende do tamanho do mapa)
+void layoutChunks(RzContext* ctx) {
+    int32_t first = 0;
+    for (int32_t cz = 0; cz < kChunksPerSide; ++cz) {
+        for (int32_t cx = 0; cx < kChunksPerSide; ++cx) {
+            RzContext::TerrainChunk& k = ctx->terrainChunks[cz * kChunksPerSide + cx];
+            k.first = first;
+            k.count = chunkWidth(cx) * chunkWidth(cz) * 6;
+            first += k.count;
+        }
+    }
+}
+
+// Faixa de alturas (mundo) dos pontos do bloco, bordas incluídas
+void chunkBounds(RzContext* ctx, int32_t cx, int32_t cz) {
+    const uint8_t* h = ctx->heights.data();
+    uint8_t lo = 255, hi = 0;
+    for (int32_t r = cz * kChunkQuads; r <= cz * kChunkQuads + chunkWidth(cz); ++r) {
+        for (int32_t c = cx * kChunkQuads; c <= cx * kChunkQuads + chunkWidth(cx); ++c) {
+            const uint8_t v = h[r * kGridSize + c];
+            if (v < lo) lo = v;
+            if (v > hi) hi = v;
+        }
+    }
+    RzContext::TerrainChunk& k = ctx->terrainChunks[cz * kChunksPerSide + cx];
+    k.yMin = float(lo) * ctx->heightScale;
+    k.yMax = float(hi) * ctx->heightScale;
+}
 
 // Quads c0..c1 x r0..r1 (inclusivos) -> staging
 void buildQuads(RzContext* ctx, int32_t c0, int32_t r0, int32_t c1, int32_t r1) {
@@ -193,8 +236,8 @@ void buildQuads(RzContext* ctx, int32_t c0, int32_t r0, int32_t c1, int32_t r1) 
     constexpr Corner kCorners[2][3] = { { { 0, 0 }, { 0, 1 }, { 1, 0 } },     // A = 1 3 2
                                         { { 1, 0 }, { 0, 1 }, { 1, 1 } } };   // B = 2 3 4
     for (int32_t r = r0; r <= r1; ++r) {
-        TerrainVertex* v = ctx->terrainStaging.data() + size_t(r * kQuadsPerSide + c0) * 6;
         for (int32_t c = c0; c <= c1; ++c) {
+            TerrainVertex* v = ctx->terrainStaging.data() + quadVertex(ctx, c, r);
             const uint8_t layer = ctx->tileMap.empty() ? 0 : ctx->tileMap[r * kGridSize + c];
             for (const auto& tri : kCorners) {
                 Vec3 p[3];
@@ -216,13 +259,27 @@ void buildQuads(RzContext* ctx, int32_t c0, int32_t r0, int32_t c1, int32_t r1) 
     }
 }
 
-// Reenvia do quad (c0, r0) ao (c1, r1) na ordem row-major (faixa contígua)
+// Reenvia os quads c0..c1 x r0..r1 (inclusivos): um trecho por linha e bloco
 void uploadQuads(RzContext* ctx, int32_t c0, int32_t r0, int32_t c1, int32_t r1) {
-    const size_t first = size_t(r0 * kQuadsPerSide + c0) * 6;
-    const size_t last  = size_t(r1 * kQuadsPerSide + c1 + 1) * 6;
     glBindBuffer(GL_ARRAY_BUFFER, ctx->terrainVbo);
-    glBufferSubData(GL_ARRAY_BUFFER, GLintptr(first * sizeof(TerrainVertex)),
-                    GLsizeiptr((last - first) * sizeof(TerrainVertex)), ctx->terrainStaging.data() + first);
+    for (int32_t r = r0; r <= r1; ++r) {
+        for (int32_t c = c0; c <= c1;) {
+            const int32_t end = (c / kChunkQuads + 1) * kChunkQuads - 1;   // último quad do bloco
+            const int32_t last = end < c1 ? end : c1;
+            const size_t first = quadVertex(ctx, c, r);
+            glBufferSubData(GL_ARRAY_BUFFER, GLintptr(first * sizeof(TerrainVertex)),
+                            GLsizeiptr(size_t(last - c + 1) * 6 * sizeof(TerrainVertex)),
+                            ctx->terrainStaging.data() + first);
+            c = last + 1;
+        }
+    }
+}
+
+// A malha inteira
+void uploadAll(RzContext* ctx) {
+    glBindBuffer(GL_ARRAY_BUFFER, ctx->terrainVbo);
+    glBufferSubData(GL_ARRAY_BUFFER, 0, GLsizeiptr(ctx->terrainStaging.size() * sizeof(TerrainVertex)),
+                    ctx->terrainStaging.data());
 }
 
 constexpr int32_t kLastQuad = kQuadsPerSide - 1;   // 254
@@ -232,15 +289,12 @@ constexpr int32_t kLastQuad = kQuadsPerSide - 1;   // 254
 // Malha inteira + borda; mapa de sombra do terreno inteiro refeito.
 // rzSetHeightmap e rzSetTerrainScale (carga).
 bool buildTerrainMesh(RzContext* ctx) {
-    ctx->terrainMinHeight = 255;
-    ctx->terrainMaxHeight = 0;
-    for (const uint8_t h : ctx->heights) {
-        if (h < ctx->terrainMinHeight) ctx->terrainMinHeight = h;
-        if (h > ctx->terrainMaxHeight) ctx->terrainMaxHeight = h;
-    }
     ctx->terrainStaging.resize(size_t(kTriangleCount) * 3);   // carga: aloca na primeira vez
+    layoutChunks(ctx);
+    for (int32_t cz = 0; cz < kChunksPerSide; ++cz)
+        for (int32_t cx = 0; cx < kChunksPerSide; ++cx) chunkBounds(ctx, cx, cz);
     buildQuads(ctx, 0, 0, kLastQuad, kLastQuad);
-    uploadQuads(ctx, 0, 0, kLastQuad, kLastQuad);
+    uploadAll(ctx);
     buildBorder(ctx);                        // continuação e parede dependem das alturas/blocos
     markTerrainShadowAll(ctx);
     return glGetError() == GL_NO_ERROR;
@@ -250,8 +304,9 @@ bool buildTerrainMesh(RzContext* ctx) {
 // alturas, a borda de relevo e a sombra ficam.
 bool rebuildTerrainTiles(RzContext* ctx) {
     ctx->terrainStaging.resize(size_t(kTriangleCount) * 3);
+    layoutChunks(ctx);
     buildQuads(ctx, 0, 0, kLastQuad, kLastQuad);
-    uploadQuads(ctx, 0, 0, kLastQuad, kLastQuad);
+    uploadAll(ctx);
     rebuildSkirtMesh(ctx);
     return glGetError() == GL_NO_ERROR;
 }
@@ -274,7 +329,7 @@ bool updateTerrain(RzContext* ctx) {
         if (c1 > kLastQuad) c1 = kLastQuad;
         if (r1 > kLastQuad) r1 = kLastQuad;
         buildQuads(ctx, c0, r0, c1, r1);
-        for (int32_t r = r0; r <= r1; ++r) uploadQuads(ctx, c0, r, c1, r);
+        uploadQuads(ctx, c0, r0, c1, r1);
     };
 
     if (ctx->heightSource) {
@@ -284,11 +339,13 @@ bool updateTerrain(RzContext* ctx) {
             if (src[i] == h[i]) continue;
             const int32_t gc = i % kGridSize, gr = i / kGridSize;
             const float yOld = float(h[i]) * hs, yNew = float(src[i]) * hs;
-            if (src[i] < ctx->terrainMinHeight) ctx->terrainMinHeight = src[i];   // faixa só cresce
-            if (src[i] > ctx->terrainMaxHeight) ctx->terrainMaxHeight = src[i];
             h[i] = src[i];
             setExtendedHeight(ctx, gc, gr, float(src[i]));
             refreshQuads(gc - 1, gr - 1, gc, gr);
+            // faixa de alturas dos blocos do ponto (até 4, na divisa)
+            for (int32_t cz = (gr - 1) / kChunkQuads; cz <= gr / kChunkQuads; ++cz)
+                for (int32_t cx = (gc - 1) / kChunkQuads; cx <= gc / kChunkQuads; ++cx)
+                    if (cx >= 0 && cz >= 0 && cx < kChunksPerSide && cz < kChunksPerSide) chunkBounds(ctx, cx, cz);
             if (gc == 0 || gr == 0 || gc == kQuadsPerSide || gr == kQuadsPerSide) moveSkirtEdgeVertex(ctx, gc, gr);
             // sombra: caixa dos quads em volta (1 tile para cada lado), com a
             // altura antiga, a nova e a dos 8 vizinhos
@@ -324,6 +381,39 @@ bool updateTerrain(RzContext* ctx) {
         if (edgeTile) rebuildSkirtMesh(ctx);
     }
     return true;                // sem glGetError: chamado no jogo, e no WebGL ele espera a GPU
+}
+
+void drawTerrain(const RzContext* ctx, const Mat4& matrix, bool withFog) {
+    const Frustum f = frustumOf(matrix);
+    const float cs = ctx->cellSize;
+    const float reach = ctx->fogFar;
+    const Vec3 o = ctx->fogOrigin;
+    glBindVertexArray(ctx->terrainVao);
+    int32_t runFirst = 0, runCount = 0;          // blocos seguidos no VBO: um envio só
+    for (int32_t cz = 0; cz < kChunksPerSide; ++cz) {
+        for (int32_t cx = 0; cx < kChunksPerSide; ++cx) {
+            const RzContext::TerrainChunk& k = ctx->terrainChunks[cz * kChunksPerSide + cx];
+            const Vec3 lo = { float(cx * kChunkQuads) * cs, k.yMin, float(cz * kChunkQuads) * cs };
+            const Vec3 hi = { float(cx * kChunkQuads + chunkWidth(cx)) * cs, k.yMax,
+                              float(cz * kChunkQuads + chunkWidth(cz)) * cs };
+            bool visible = boxInFrustum(f, lo, hi);
+            if (visible && withFog) {            // o ponto da caixa mais perto da origem da neblina
+                const float dx = fmaxf(fmaxf(lo.x - o.x, 0.0f), o.x - hi.x);
+                const float dy = fmaxf(fmaxf(lo.y - o.y, 0.0f), o.y - hi.y);
+                const float dz = fmaxf(fmaxf(lo.z - o.z, 0.0f), o.z - hi.z);
+                visible = dx * dx + dy * dy + dz * dz <= reach * reach;
+            }
+            if (!visible) continue;
+            if (runCount > 0 && runFirst + runCount == k.first) {
+                runCount += k.count;
+                continue;
+            }
+            if (runCount > 0) glDrawArrays(GL_TRIANGLES, runFirst, runCount);
+            runFirst = k.first;
+            runCount = k.count;
+        }
+    }
+    if (runCount > 0) glDrawArrays(GL_TRIANGLES, runFirst, runCount);
 }
 
 // Esfera envolvente: raio = meia diagonal da caixa do terreno. Usada pela

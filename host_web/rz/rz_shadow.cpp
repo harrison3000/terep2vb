@@ -10,8 +10,8 @@
 // (sampler2DArrayShadow), kShadowMapSize de lado, cada camada no seu FBO.
 // As caixas 0 e 1 envolvem a esfera da fatia do frustum da câmera (raio só
 // depende do FOV e dos limites: não muda quando a câmera gira) e andam em
-// passos de um texel, para a sombra não tremer. Delas, só as linhas do
-// terreno que podem cair na caixa são desenhadas (a malha é row-major).
+// passos de um texel, para a sombra não tremer. Em todas, só os blocos do
+// terreno que caem na caixa são desenhados (drawTerrain).
 // A 2 é um quadrado em volta do olho (meia-largura = fim da neblina +
 // recentragem + margem), desenhado só quando o olho anda kCascadeFarRecenter
 // tiles desde o último desenho, a neblina muda de tamanho ou o terreno muda
@@ -106,60 +106,11 @@ float sliceSphere(const RzContext* ctx, float d0, float d1, Vec3* center) {
     return rFar > rNear ? rFar : rNear;
 }
 
-// Quads da malha do terreno que podem cair na caixa: os 4 cantos da caixa,
-// seguidos na direção da luz até a menor e a maior altura do terreno (ele
-// todo fica entre elas), dão um retângulo no plano xz (linhas r0..r1, colunas
-// c0..c1). *outside: a caixa passa da borda do mapa (a continuação também entra).
-void terrainQuadsInBox(const RzContext* ctx, const Mat4& view, ShadowBox b,
-                       int32_t* r0, int32_t* r1, int32_t* c0, int32_t* c1, bool* outside) {
-    const Vec3 rx = { view[0, 0], view[0, 1], view[0, 2] };
-    const Vec3 uy = { view[1, 0], view[1, 1], view[1, 2] };
-    const Vec3 fw = { -view[2, 0], -view[2, 1], -view[2, 2] };     // da luz para o terreno
-    // olho da luz: view = [R | -R·eye] → eye = -(R^T · t)
-    const Vec3 t = { view[0, 3], view[1, 3], view[2, 3] };
-    const Vec3 eye = { -(rx.x * t.x + uy.x * t.y - fw.x * t.z),
-                       -(rx.y * t.x + uy.y * t.y - fw.y * t.z),
-                       -(rx.z * t.x + uy.z * t.y - fw.z * t.z) };
-    const float cs = ctx->cellSize;
-    const float heights[2] = { float(ctx->terrainMinHeight) * ctx->heightScale,
-                               float(ctx->terrainMaxHeight) * ctx->heightScale };
-    float x0 = 1.0e30f, z0 = 1.0e30f, x1 = -1.0e30f, z1 = -1.0e30f;
-    for (int32_t k = 0; k < 4; ++k) {
-        const float lx = b.cx + ((k & 1) ? b.half : -b.half);
-        const float ly = b.cy + ((k & 2) ? b.half : -b.half);
-        const Vec3 p0 = { eye.x + rx.x * lx + uy.x * ly, eye.y + rx.y * lx + uy.y * ly, eye.z + rx.z * lx + uy.z * ly };
-        for (const float h : heights) {
-            const float s = (h - p0.y) / fw.y;               // a luz desce: fw.y < 0
-            const float x = p0.x + fw.x * s, z = p0.z + fw.z * s;
-            x0 = fminf(x0, x); x1 = fmaxf(x1, x);
-            z0 = fminf(z0, z); z1 = fmaxf(z1, z);
-        }
-    }
-    const float edge = float(kQuadsPerSide) * cs;
-    *outside = x0 < 0.0f || z0 < 0.0f || x1 > edge || z1 > edge;
-    auto clampQuad = [](int32_t q) { return q < 0 ? 0 : (q > kQuadsPerSide - 1 ? kQuadsPerSide - 1 : q); };
-    *r0 = clampQuad(int32_t(floorf(z0 / cs)) - 1);
-    *r1 = clampQuad(int32_t(ceilf(z1 / cs)) + 1);
-    *c0 = clampQuad(int32_t(floorf(x0 / cs)) - 1);
-    *c1 = clampQuad(int32_t(ceilf(x1 / cs)) + 1);
-    if (z1 < 0.0f || x1 < 0.0f || z0 > edge || x0 > edge) { *r0 = 1; *r1 = 0; }   // caixa toda fora do mapa
-}
-
-// Terreno (só os quads da caixa: um glDrawArrays por linha) e, se ela passa
-// da borda, a continuação
-void drawTerrainDepth(const RzContext* ctx, const Mat4& view, ShadowBox b) {
+// Terreno e continuação: só os blocos e as regiões que caem no mapa
+void drawTerrainDepth(const RzContext* ctx, const Mat4& matrix) {
     if (!ctx->hasTerrain()) return;
-    int32_t r0, r1, c0, c1;
-    bool outside;
-    terrainQuadsInBox(ctx, view, b, &r0, &r1, &c0, &c1, &outside);
-    glBindVertexArray(ctx->terrainVao);
-    if (c0 == 0 && c1 == kQuadsPerSide - 1) {               // linhas inteiras: um envio só
-        if (r0 <= r1) glDrawArrays(GL_TRIANGLES, r0 * kQuadsPerSide * 6, (r1 - r0 + 1) * kQuadsPerSide * 6);
-    } else {
-        for (int32_t r = r0; r <= r1; ++r)
-            glDrawArrays(GL_TRIANGLES, (r * kQuadsPerSide + c0) * 6, (c1 - c0 + 1) * 6);
-    }
-    if (outside) drawSkirtDepth(ctx);
+    drawTerrain(ctx, matrix, false);
+    drawSkirtDepth(ctx, matrix);
 }
 
 } // namespace
@@ -250,11 +201,7 @@ void renderShadowMaps(RzContext* ctx) {
         const ShadowBox whole = { 0.0f, 0.0f, radius };
         ctx->shadowMatrix[2] = boxProjection(ctx, whole) * view;
         beginPass(ctx, ctx->cascades - 1, ctx->shadowMatrix[2]);
-        if (ctx->hasTerrain()) {
-            glBindVertexArray(ctx->terrainVao);
-            glDrawArrays(GL_TRIANGLES, 0, kTriangleCount * 3);
-            drawSkirtDepth(ctx);
-        }
+        drawTerrainDepth(ctx, ctx->shadowMatrix[2]);
         drawObjectsDepth(ctx, ctx->shadowMatrix[2], -1, -1);
         ctx->cascadeFarValid = true;
         ctx->cascadeFarOverview = true;
@@ -285,7 +232,7 @@ void renderShadowMaps(RzContext* ctx) {
         const ShadowBox box = snappedBox(view, center, half, ctx->shadowSize);
         ctx->shadowMatrix[i] = boxProjection(ctx, box) * view;
         beginPass(ctx, i, ctx->shadowMatrix[i]);
-        drawTerrainDepth(ctx, view, box);
+        drawTerrainDepth(ctx, ctx->shadowMatrix[i]);
         drawObjectsDepth(ctx, ctx->shadowMatrix[i], -1, -1);
     }
     if (single) {                       // sem a cascata 2 (os shaders da variante CASCADES 1 não as leem)
@@ -321,7 +268,7 @@ void renderShadowMaps(RzContext* ctx) {
         ctx->shadowTexel[2] = 2.0f * ctx->cascadeFarHalf / float(ctx->shadowSize);
         ctx->shadowMatrix[2] = boxProjection(ctx, box) * view;
         beginPass(ctx, 2, ctx->shadowMatrix[2]);
-        drawTerrainDepth(ctx, view, box);
+        drawTerrainDepth(ctx, ctx->shadowMatrix[2]);
         ctx->cascadeFarValid = true;
         ctx->cascadeFarOverview = false;
     } else if (ctx->terrainShadowDirty) {
@@ -347,11 +294,7 @@ void renderShadowMaps(RzContext* ctx) {
             glEnable(GL_SCISSOR_TEST);
             glScissor(ix0, iy0, ix1 - ix0, iy1 - iy0);
             beginPass(ctx, 2, ctx->shadowMatrix[2]);             // o clear respeita o scissor
-            if (ctx->hasTerrain()) {
-                glBindVertexArray(ctx->terrainVao);
-                glDrawArrays(GL_TRIANGLES, 0, kTriangleCount * 3);
-                drawSkirtDepth(ctx);
-            }
+            drawTerrainDepth(ctx, ctx->shadowMatrix[2]);
             glDisable(GL_SCISSOR_TEST);
         }
     }

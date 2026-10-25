@@ -22,6 +22,10 @@ constexpr int32_t kQuadsPerSide  = kGridSize - 1;               // 255
 constexpr int32_t kVertexCount   = kGridSize * kGridSize;       // 65.536
 constexpr int32_t kTriangleCount = kQuadsPerSide * kQuadsPerSide * 2; // 130.050
 constexpr int32_t kPaletteSize   = 766;                         // soma de 3 alturas: 0..765
+// Blocos do terreno (recorte): kChunkQuads x kChunkQuads quads, contíguos no VBO
+constexpr int32_t kChunkQuads    = 16;
+constexpr int32_t kChunksPerSide = (kQuadsPerSide + kChunkQuads - 1) / kChunkQuads;   // 16 (o último com 15)
+constexpr int32_t kChunkCount    = kChunksPerSide * kChunksPerSide;
 
 // Cor de fundo padrão (antes de rzSetBackgroundColor + rzLoadTileAtlas), já em float
 constexpr float kBackgroundR = 32.0f / 255.0f;
@@ -215,6 +219,15 @@ struct Mat4 {
 };
 
 Mat4 operator*(const Mat4& a, const Mat4& b);
+
+// Os 6 planos (a, b, c, d: dentro com a·x + b·y + c·z + d >= 0) de uma matriz
+// de projeção · view (perspectiva ou ortográfica)
+struct Frustum {
+    float plane[6][4];
+};
+
+Frustum frustumOf(const Mat4& m);
+bool    boxInFrustum(const Frustum& f, Vec3 lo, Vec3 hi);   // a caixa pode aparecer (conservador)
 
 // ---------------------------------------------------------------------------
 // Objetos
@@ -536,12 +549,16 @@ struct RzContext {
 
     // Terreno
     std::vector<uint8_t> heights;      // 256x256, cópia na CPU (malha e câmera de perseguição)
-    uint8_t   terrainMinHeight = 0, terrainMaxHeight = 255;   // faixa das alturas (cascatas de sombra)
     float     cellSize    = rz::kDefaultCellSize;
     float     heightScale = rz::kDefaultHeightScale;
     rz::GLuint terrainVao = 0;
-    rz::GLuint terrainVbo = 0;         // 130.050 x 3 TerrainVertex, remontado na carga
+    rz::GLuint terrainVbo = 0;         // 130.050 x 3 TerrainVertex em blocos, remontado na carga
     std::vector<rz::TerrainVertex> terrainStaging;  // a mesma malha na CPU (rzUpdateTerrain)
+    struct TerrainChunk {
+        int32_t first = 0, count = 0;  // vértices no VBO
+        float   yMin = 0.0f, yMax = 0.0f;
+    };
+    TerrainChunk terrainChunks[rz::kChunkCount];    // row-major, bloco (x, z) em z · kChunksPerSide + x
     const uint8_t* heightSource = nullptr;  // buffers do host (rzSetHeightmap/rzSetTileMap),
     const uint8_t* tileSource   = nullptr;  // relidos por rzUpdateTerrain
     bool hasTerrain() const { return !heights.empty(); }
@@ -636,6 +653,10 @@ void updateTerrainBounds(RzContext* ctx);
 bool buildTerrainMesh(RzContext* ctx);      // malha inteira + borda + sombra (carga)
 bool rebuildTerrainTiles(RzContext* ctx);   // só blocos (rzSetTileMap)
 bool updateTerrain(RzContext* ctx);         // rzUpdateTerrain: só o que mudou
+// Os blocos do terreno que caem em matrix (projeção · view), juntando os
+// vizinhos no VBO; withFog: também só os que começam antes do fim da neblina.
+// Programa e uniforms já prontos.
+void drawTerrain(const RzContext* ctx, const Mat4& matrix, bool withFog);
 void buildAtlasLevels(uint32_t* tiles, const uint8_t* indices, const uint8_t* paletteRGB);
 void downsample(const uint32_t* src, uint32_t* dst, int32_t dstSide);
 void fillTransparent(uint32_t* img, int32_t side);   // cor dos texels alfa 0 = vizinhos opacos
@@ -682,7 +703,7 @@ void  setExtendedHeight(RzContext* ctx, int32_t gc, int32_t gr, float height);  
 uint8_t skirtTile(const RzContext* ctx, int32_t c, int32_t r);   // bloco de uma célula da continuação
 float extendedGroundHeight(const RzContext* ctx, float x, float z);
 void  drawSkirt(const RzContext* ctx);             // programa do terreno em uso
-void  drawSkirtDepth(const RzContext* ctx);        // passe de sombra
+void  drawSkirtDepth(const RzContext* ctx, const Mat4& matrix);   // passe de sombra: as regiões que caem nele
 void  drawWall(const RzContext* ctx, const Mat4& viewProj);
 
 // rz_wheels.cpp
