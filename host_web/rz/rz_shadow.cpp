@@ -110,7 +110,7 @@ float sliceSphere(const RzContext* ctx, float d0, float d1, Vec3* center) {
 void drawTerrainDepth(const RzContext* ctx, const Mat4& matrix) {
     if (!ctx->hasTerrain()) return;
     drawTerrain(ctx, matrix, false);
-    drawSkirtDepth(ctx, matrix);
+    drawSkirt(ctx, matrix, false);
 }
 
 } // namespace
@@ -262,7 +262,6 @@ void renderShadowMaps(RzContext* ctx) {
         if (moveBox) {
             ctx->cascadeFarCenter = ctx->eyePos;
             ctx->cascadeFarHalf = farHalf;
-            ++ctx->cascadeFarRedraws;
         }
         const ShadowBox box = snappedBox(view, ctx->cascadeFarCenter, ctx->cascadeFarHalf, ctx->shadowSize);
         ctx->shadowTexel[2] = 2.0f * ctx->cascadeFarHalf / float(ctx->shadowSize);

@@ -398,40 +398,28 @@ float extendedGroundHeight(const RzContext* ctx, float x, float z) {
     return (top + (bot - top) * fz) * ctx->heightScale;
 }
 
-// Continuação (programa do terreno já em uso, com os mesmos uniforms). Só as
-// regiões a menos do fim da neblina do olho (na horizontal): no meio do mapa, nenhuma.
-void drawSkirt(const RzContext* ctx) {
-    if (!ctx->fogOn || ctx->skirtVertexCount == 0) return;
-    const float cs = ctx->cellSize;
-    const float lo = float(-kSkirtExtent) * cs, hi = float(kQuadsPerSide + kSkirtExtent) * cs;
-    const float m0 = 0.0f, m1 = float(kQuadsPerSide) * cs;
-    // retângulos (x0, x1, z0, z1) das regiões 0 norte, 1 leste, 2 sul, 3 oeste
-    const float rect[4][4] = { { lo, hi, lo, m0 }, { m1, hi, m0, m1 },
-                               { lo, hi, m1, hi }, { lo, m0, m0, m1 } };
-    const float reach = ctx->fogFar;
-    const Vec3 o = ctx->fogOrigin;
-    glBindVertexArray(ctx->skirtVao);
-    for (int32_t i = 0; i < 4; ++i) {
-        const float dx = fmaxf(fmaxf(rect[i][0] - o.x, 0.0f), o.x - rect[i][1]);
-        const float dz = fmaxf(fmaxf(rect[i][2] - o.z, 0.0f), o.z - rect[i][3]);
-        if (dx * dx + dz * dz > reach * reach || ctx->skirtCount[i] == 0) continue;
-        glDrawArrays(GL_TRIANGLES, ctx->skirtFirst[i], ctx->skirtCount[i]);
-    }
-}
-
-void drawSkirtDepth(const RzContext* ctx, const Mat4& matrix) {
+// Continuação, nas regiões (0 norte, 1 leste, 2 sul, 3 oeste) que caem em
+// matrix (projeção · view); withFog: também só as que começam antes do fim
+// da neblina (no meio do mapa, nenhuma). Programa e uniforms já prontos.
+void drawSkirt(const RzContext* ctx, const Mat4& matrix, bool withFog) {
     if (ctx->skirtVertexCount == 0) return;
     const float cs = ctx->cellSize;
     const float lo = float(-kSkirtExtent) * cs, hi = float(kQuadsPerSide + kSkirtExtent) * cs;
     const float m0 = 0.0f, m1 = float(kQuadsPerSide) * cs;
-    const float rect[4][4] = { { lo, hi, lo, m0 }, { m1, hi, m0, m1 },     // como em drawSkirt
-                               { lo, hi, m1, hi }, { lo, m0, m0, m1 } };
+    const float top = 255.0f * ctx->heightScale;      // alturas de fora: 0..255 (buildExtendedHeights)
+    const Vec3 box[4][2] = { { { lo, 0.0f, lo }, { hi, top, m0 } }, { { m1, 0.0f, m0 }, { hi, top, m1 } },
+                             { { lo, 0.0f, m1 }, { hi, top, hi } }, { { lo, 0.0f, m0 }, { m0, top, m1 } } };
     const Frustum f = frustumOf(matrix);
+    const float reach = ctx->fogFar;
+    const Vec3 o = ctx->fogOrigin;
     glBindVertexArray(ctx->skirtVao);
-    for (int32_t i = 0; i < 4; ++i) {           // alturas de fora: 0..255 (buildExtendedHeights)
-        if (ctx->skirtCount[i] == 0 ||
-            !boxInFrustum(f, { rect[i][0], 0.0f, rect[i][2] }, { rect[i][1], 255.0f * ctx->heightScale, rect[i][3] }))
-            continue;
+    for (int32_t i = 0; i < 4; ++i) {
+        if (ctx->skirtCount[i] == 0 || !boxInFrustum(f, box[i][0], box[i][1])) continue;
+        if (withFog) {                               // na horizontal
+            const float dx = fmaxf(fmaxf(box[i][0].x - o.x, 0.0f), o.x - box[i][1].x);
+            const float dz = fmaxf(fmaxf(box[i][0].z - o.z, 0.0f), o.z - box[i][1].z);
+            if (dx * dx + dz * dz > reach * reach) continue;
+        }
         glDrawArrays(GL_TRIANGLES, ctx->skirtFirst[i], ctx->skirtCount[i]);
     }
 }

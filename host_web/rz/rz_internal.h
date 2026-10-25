@@ -530,7 +530,6 @@ struct RzContext {
     bool       cascadeFarOverview = false;           // ...na visão geral (terreno inteiro + objetos)
     rz::Vec3   cascadeFarCenter = { 0.0f, 0.0f, 0.0f };   // olho quando a cascata 2 foi refeita
     float      cascadeFarHalf = 0.0f;                // meia-largura dela (muda com a neblina)
-    uint32_t   cascadeFarRedraws = 0;                // recentragens da cascata 2 (testes)
 
     // Do frame (updateCamera): olho e neblina
     rz::Vec3   eyePos = { 0.0f, 0.0f, 0.0f };
@@ -704,8 +703,7 @@ void  moveSkirtEdgeVertex(RzContext* ctx, int32_t gc, int32_t gr);   // ponto da
 void  setExtendedHeight(RzContext* ctx, int32_t gc, int32_t gr, float height);   // ponto do mapa
 uint8_t skirtTile(const RzContext* ctx, int32_t c, int32_t r);   // bloco de uma célula da continuação
 float extendedGroundHeight(const RzContext* ctx, float x, float z);
-void  drawSkirt(const RzContext* ctx);             // programa do terreno em uso
-void  drawSkirtDepth(const RzContext* ctx, const Mat4& matrix);   // passe de sombra: as regiões que caem nele
+void  drawSkirt(const RzContext* ctx, const Mat4& matrix, bool withFog);   // como drawTerrain
 void  drawWall(const RzContext* ctx, const Mat4& viewProj);
 
 // rz_wheels.cpp
