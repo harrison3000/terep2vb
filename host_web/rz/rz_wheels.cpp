@@ -337,10 +337,11 @@ void drawWheelsDepth(const RzContext* ctx, const Object& o) {
 // Passe principal, depois dos objetos: o pneu (lateral), programa do terreno
 // sem textura. As faces vão em drawWheelFaces. Sem culling (o depth resolve).
 void drawWheels(RzContext* ctx, const Mat4& viewProj) {
+    const Frustum f = frustumOf(viewProj);
     bool bound = false;
     const TerrainProgram& t = ctx->terrainProgram;
     for (const Object& o : ctx->objects) {
-        if (!o.alive || !o.positioned || o.wheelStaging.empty() || !objectInRange(ctx, o)) continue;
+        if (!o.alive || !o.positioned || o.wheelStaging.empty() || !objectInView(ctx, o, f)) continue;
         if (!bound) {
             glUseProgram(t.program);
             setMatrix(t.viewProj, viewProj);
@@ -366,10 +367,11 @@ void drawWheels(RzContext* ctx, const Mat4& viewProj) {
 // As faces (discos) das rodas: programa dos objetos, com a textura do objeto,
 // depois de drawWheels. Sem culling, como o pneu.
 void drawWheelFaces(RzContext* ctx, const Mat4& viewProj) {
+    const Frustum f = frustumOf(viewProj);
     bool bound = false;
     const ObjectProgram& prog = ctx->objectProgram;
     for (const Object& o : ctx->objects) {
-        if (!o.alive || !o.positioned || o.wheelCapVerts <= 0 || !objectInRange(ctx, o)) continue;
+        if (!o.alive || !o.positioned || o.wheelCapVerts <= 0 || !objectInView(ctx, o, f)) continue;
         if (!bound) {
             glUseProgram(prog.program);
             setMatrix(prog.viewProj, viewProj);

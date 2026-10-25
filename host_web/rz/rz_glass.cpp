@@ -88,9 +88,10 @@ void freeGlass(Object& o) {
 
 // Passe do vidro: depois dos objetos opacos
 void drawGlass(RzContext* ctx, const Mat4& viewProj) {
+    const Frustum f = frustumOf(viewProj);
     bool programBound = false;
     for (Object& o : ctx->objects) {
-        if (!o.alive || !o.positioned || o.glassStaging.empty() || !objectInRange(ctx, o)) continue;
+        if (!o.alive || !o.positioned || o.glassStaging.empty() || !objectInView(ctx, o, f)) continue;
         if (!programBound) {
             const GlassProgram& g = ctx->glassProgram;
             glUseProgram(g.program);

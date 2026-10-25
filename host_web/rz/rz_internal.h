@@ -99,6 +99,7 @@ inline bool validCoord(float v) { return v > -1.0e6f && v < 1.0e6f; }
 constexpr float kFogStartDefault = 30.0f;
 constexpr float kFogEndDefault   = 65.0f;
 constexpr float kFogCullMargin = 10.0f;   // tiles: objetos além do fim + raio + margem
+constexpr float kViewCullMargin = 1.0f;   // tiles além da esfera do objeto: rodas e linhas (recorte por frustum)
                                           // não entram nem na tela nem nas sombras
                                           // (a margem cobre sombras longas para dentro)
 
@@ -220,14 +221,15 @@ struct Mat4 {
 
 Mat4 operator*(const Mat4& a, const Mat4& b);
 
-// Os 6 planos (a, b, c, d: dentro com a·x + b·y + c·z + d >= 0) de uma matriz
-// de projeção · view (perspectiva ou ortográfica)
+// Os 6 planos (a, b, c, d: dentro com a·x + b·y + c·z + d >= 0, (a, b, c)
+// unitário) de uma matriz de projeção · view (perspectiva ou ortográfica)
 struct Frustum {
     float plane[6][4];
 };
 
 Frustum frustumOf(const Mat4& m);
 bool    boxInFrustum(const Frustum& f, Vec3 lo, Vec3 hi);   // a caixa pode aparecer (conservador)
+bool    sphereInFrustum(const Frustum& f, Vec3 center, float radius);
 
 // ---------------------------------------------------------------------------
 // Objetos
@@ -779,6 +781,7 @@ int32_t mipLevels(int32_t side);   // log2(side) + 1
 
 // rz_object.cpp
 bool objectInRange(const RzContext* ctx, const Object& o);   // não está todo além da neblina
+bool objectInView(const RzContext* ctx, const Object& o, const Frustum& f);   // no alcance e no frustum
 void prepareObjects(RzContext* ctx);          // reenvia os VBOs alterados
 // passe da sombra (programa já ligado): onlyId >= 0 desenha só ele; skipId >= 0 pula ele
 void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId, int32_t skipId);

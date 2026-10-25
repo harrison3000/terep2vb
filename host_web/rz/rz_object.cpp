@@ -280,6 +280,12 @@ bool objectInRange(const RzContext* ctx, const Object& o) {
     return dot(d, d) <= reach * reach;
 }
 
+// No alcance e com a esfera (+ kViewCullMargin) dentro do frustum de quem
+// desenha: a câmera, ou a caixa de um mapa de sombra
+bool objectInView(const RzContext* ctx, const Object& o, const Frustum& f) {
+    return objectInRange(ctx, o) && sphereInFrustum(f, o.center, o.radius + kViewCullMargin * ctx->cellSize);
+}
+
 // Reenvia os VBOs alterados, antes dos dois passes do frame (sem alocar,
 // fora o primeiro envio depois da carga). Os fora do alcance ficam para
 // quando entrarem (gpuDirty continua).
@@ -306,11 +312,11 @@ void prepareObjects(RzContext* ctx) {
 
 // Passe da sombra: só a geometria (o programa de profundidade já está ligado).
 // onlyId >= 0: só esse objeto; skipId >= 0: todos menos ele.
-// Os além da neblina ficam de fora; os que só saem da caixa do mapa são
-// cortados pelo clipping.
+// Os além da neblina ou fora da caixa do mapa ficam de fora.
 void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId, int32_t skipId) {
+    const Frustum f = frustumOf(lightViewProj);
     auto selected = [&](int32_t id, const Object& o) {
-        return drawable(o) && !(onlyId >= 0 && id != onlyId) && id != skipId && objectInRange(ctx, o);
+        return drawable(o) && !(onlyId >= 0 && id != onlyId) && id != skipId && objectInView(ctx, o, f);
     };
     // Objetos: programa próprio (posição do bloco)
     glUseProgram(ctx->objectDepthProgram.program);
@@ -334,9 +340,10 @@ void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId,
 // anti-horário na tela (glFrontFace define frente = anti-horário visual, então
 // é GL_FRONT que sai).
 void drawObjects(RzContext* ctx, const Mat4& viewProj) {
+    const Frustum f = frustumOf(viewProj);
     bool programBound = false;
     for (Object& o : ctx->objects) {
-        if (!drawable(o) || !objectInRange(ctx, o)) continue;
+        if (!drawable(o) || !objectInView(ctx, o, f)) continue;
         const ObjectProgram& prog = ctx->objectProgram;
         if (!programBound) {
             glEnable(GL_CULL_FACE);
