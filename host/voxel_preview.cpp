@@ -13,7 +13,7 @@
 #include <cstring>
 #include <dirent.h>
 #include <strings.h>
-#include "pcx.hpp"
+#include "../common/pcx.hpp"
 #include "voxel_preview.hpp"
 
 std::string find_file_nocase(const std::string &dir, const char *name)

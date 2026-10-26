@@ -6,79 +6,44 @@
  * (data_fopen, case-insensitive on systems that care).
  */
 #include <cstdlib>
+#include <cstring>
 #include "terep.hpp"
-
-/* The PCX being read (the original kept them in its data segment). */
-static PcxHeader pcx_header;
-static uint16_t  pcx_width, pcx_height;
-static uint8_t   pcx_buffer[0x300];
+#include "../common/pcx.hpp"
 
 /* ------------------------------------------------------------------------
- * PCX (8-bit, single plane, RLE)
+ * PCX (8-bit, single plane, RLE): read by common/pcx, then put in a segment
  * ---------------------------------------------------------------------- */
 
-/* Read the 128-byte header.  Like the original, the check only rejects
- * fewer than 8 bits per pixel, or 8 bits with no planes.  orig 1000:5a95 */
-static bool pcx_read_header(FILE *f)
+/* At most 256 x 256 pixels, as the original: wider images are cropped (rows
+ * are packed, min(width, 256) apart, not padded to 256), taller ones cut at
+ * 256 rows.  The original (orig 1000:5acf) did this while decoding, reading
+ * the file in 768-byte chunks, and checked only the bits per pixel and the
+ * planes of the header (1000:5a95). */
+static void pcx_to_segment(const PcxImage &img, uint8_t *dst)
 {
-    fread(&pcx_header, 1, sizeof pcx_header, f);
-    pcx_width = (uint16_t)(pcx_header.xmax - pcx_header.xmin + 1);
-    pcx_height = (uint16_t)(pcx_header.ymax - pcx_header.ymin + 1);
-    uint8_t bpp = pcx_header.bits_per_pixel;
-    return !(bpp < 8 || (bpp == 8 && pcx_header.planes == 0));
+    int w = img.width < 0x100 ? img.width : 0x100;
+    int h = img.height < 0x100 ? img.height : 0x100;
+    for (int y = 0; y < h; y++)
+        memcpy(dst + (size_t)y * w, &img.pixels[(size_t)y * img.width], (size_t)w);
 }
 
-/* Decode the image into a segment, at most 256 x 256 pixels: wider
- * images are cropped (rows are packed, not padded to 256).  The file is
- * read through pcx_buffer in 768-byte chunks.  orig 1000:5acf */
-static void pcx_decode(FILE *f, uint8_t *dst)
+static bool pcx_read(const char *name, PcxImage &img)
 {
-    uint16_t in = sizeof pcx_buffer;     /* buffer empty */
-    uint16_t out = 0;
-    uint8_t value = 0, repeat = 0;
-    int16_t rows = (int16_t)pcx_height > 0x100 ? 0x100 : (int16_t)pcx_height;
-    uint16_t row = (uint16_t)rows;
-
-    do {
-        uint16_t x = 0;
-        do {
-            if (repeat) {
-                repeat--;
-            } else {
-                if (in == sizeof pcx_buffer) {
-                    fread(pcx_buffer, 1, sizeof pcx_buffer, f);
-                    in = 0;
-                }
-                value = pcx_buffer[in++];
-                if ((value & 0xc0) == 0xc0) {
-                    repeat = (uint8_t)((value & 0x3f) - 1);   /* a count of 0 gives 255 */
-                    if (in == sizeof pcx_buffer) {
-                        fread(pcx_buffer, 1, sizeof pcx_buffer, f);
-                        in = 0;
-                    }
-                    value = pcx_buffer[in++];
-                }
-            }
-            if (x < 0x100)
-                dst[out++] = value;
-            x++;
-        } while (x < pcx_width);
-    } while (--row);
+    FILE *f = data_fopen(name);
+    if (!f)
+        return false;
+    bool ok = img.read(f);
+    fclose(f);
+    return ok;
 }
 
 /* orig 1000:5a60 */
 static bool pcx_load(const char *name, uint8_t *dst)
 {
-    FILE *f = data_fopen(name);
-    if (!f)
+    PcxImage img;
+    if (!pcx_read(name, img))
         return false;
-    if (!pcx_read_header(f)) {
-        fclose(f);
-        return false;
-    }
-    fseek(f, 0x80, SEEK_SET);
-    pcx_decode(f, dst);
-    fclose(f);
+    pcx_to_segment(img, dst);
     return true;
 }
 
@@ -101,17 +66,12 @@ static void load_map()
     if (!pcx_load(fname_maptex, segments.maptex.data()))
         return;
 
-    FILE *f = data_fopen(fname_col);
-    if (!f)
+    PcxImage col;                       /* the tile of each cell, and the palette */
+    if (!pcx_read(fname_col, col))
         return;
-    if (!pcx_read_header(f) || fseek(f, -0x300, SEEK_END) != 0) {
-        fclose(f);
-        return;
-    }
-    fread(map_tables.palette, 1, sizeof map_tables.palette, f);
-    fseek(f, 0x80, SEEK_SET);
-    pcx_decode(f, colormap());
-    fclose(f);
+    if (col.palette.size() == sizeof map_tables.palette)
+        memcpy(map_tables.palette, col.palette.data(), sizeof map_tables.palette);
+    pcx_to_segment(col, colormap());
 
     read_table(fname_fog, map_tables.fog_table, sizeof map_tables.fog_table);
     read_table(fname_smoke, map_tables.shade_table, sizeof map_tables.shade_table);
@@ -165,10 +125,12 @@ static void load_car_skin(Car &car, const char *name)
     FILE *f = data_fopen(name);
     if (!f)
         return;
-    pcx_read_header(f);
-    car.skin.assign(SEGMENT_SIZE, 0);
-    pcx_decode(f, car.skin.data());
+    PcxImage img;
+    bool ok = img.read(f);
     fclose(f);
+    car.skin.assign(SEGMENT_SIZE, 0);   /* the original took any file there was */
+    if (ok)
+        pcx_to_segment(img, car.skin.data());
 }
 
 static const char *const car_dat_names[MAX_CARS] = { "car1.dat", "car2.dat", "car3.dat", "car4.dat", "car5.dat" };

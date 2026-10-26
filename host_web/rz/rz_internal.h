@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <vector>
 
+#include "../../common/pcx.hpp"
 #include "renderizeitor.h"
 #include "rz_gl.h"
 
@@ -458,12 +459,6 @@ struct DepthProgram {
     GLint  model = -1;     // uModel: identidade, exceto nas rodas
 };
 
-// Imagem paletizada lida de um PCX (rz_pcx.cpp)
-struct PcxImage {
-    int32_t width = 0, height = 0;
-    std::vector<uint8_t> pixels;   // width * height, linha 0 em cima
-    uint8_t palette[768];          // 256 x (R, G, B)
-};
 
 } // namespace rz
 
@@ -670,12 +665,12 @@ void setTerrainVertexLayout();
 // 0 posição, 1 normal, 2 (u, v)
 void setObjectVertexLayout();
 
-// rz_pcx.cpp: decodifica um PCX de 8 bits inteiro (o arquivo na memória).
-// Devolve RZ_OK, RZ_ERR_FORMAT ou RZ_ERR_SIZE.
-int32_t loadPcx(const uint8_t* file, int32_t size, PcxImage& img);
-// rz_pcx.cpp: o canto 256x256 de um PCX de 8 bits (indices: 256*256 bytes,
-// paletteRGB: 768 bytes). Devolve RZ_OK, RZ_ERR_FORMAT ou RZ_ERR_SIZE.
-int32_t loadPcxAtlas(const uint8_t* file, int32_t size, uint8_t* indices, uint8_t* paletteRGB);
+// PCX de 8 bits inteiro, na memória (common/pcx), com a paleta (as texturas
+// precisam dela). Devolve RZ_OK ou RZ_ERR_FORMAT.
+inline int32_t decodePcx(const uint8_t* file, int32_t size, PcxImage& img) {
+    if (size < 0 || !img.decode(file, size_t(size)) || img.palette.size() != 768) return RZ_ERR_FORMAT;
+    return RZ_OK;
+}
 
 // rz_camera.cpp: avança a câmera um frame e devolve view-projection (convenção GL);
 // também guarda o foco da sombra.

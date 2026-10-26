@@ -103,7 +103,7 @@ static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint
                                         uint8_t* outPalette) {
     *outTexture = 0;
     PcxImage img;
-    const int32_t err = loadPcx(pcx, size, img);
+    const int32_t err = decodePcx(pcx, size, img);
     if (err != RZ_OK) return err;
     if (img.width < kMinObjectTexture) return RZ_ERR_SIZE;
 
@@ -130,7 +130,7 @@ static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint
 
     *outTexture = uploadSquareTexture(texels.data(), side);
     if (!*outTexture) return RZ_ERR_GL;
-    std::memcpy(outPalette, img.palette, 768);
+    std::memcpy(outPalette, img.palette.data(), 768);
     return RZ_OK;
 }
 

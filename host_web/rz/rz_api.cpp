@@ -143,10 +143,15 @@ int32_t rzLoadTileAtlas(RzContext* ctx, const uint8_t* pcx, int32_t size) {
     if (!ctx || !pcx) return recordError(ctx, "rzLoadTileAtlas", RZ_ERR_INVALID_ARG);
 
     // Decodifica tudo antes de mexer na textura: se o arquivo falhar, o atlas anterior fica.
-    std::vector<uint8_t> indices(size_t(kAtlasSize) * kAtlasSize);
-    uint8_t paletteRGB[768];
-    const int32_t err = loadPcxAtlas(pcx, size, indices.data(), paletteRGB);
+    // Só o canto superior esquerdo, 256x256
+    PcxImage img;
+    int32_t err = decodePcx(pcx, size, img);
+    if (err == RZ_OK && (img.width < kAtlasSize || img.height < kAtlasSize)) err = RZ_ERR_SIZE;
     if (err != RZ_OK) return recordError(ctx, "rzLoadTileAtlas", err);
+    std::vector<uint8_t> indices(size_t(kAtlasSize) * kAtlasSize);
+    for (int32_t y = 0; y < kAtlasSize; ++y)
+        std::memcpy(indices.data() + y * kAtlasSize, img.pixels.data() + size_t(y) * size_t(img.width), size_t(kAtlasSize));
+    const uint8_t* paletteRGB = img.palette.data();
 
     // 256 blocos x (256 + 64 + 16 + 4 + 1) texels, por nível; temporário da carga
     constexpr int32_t kTexels = kMaxTiles * 341;

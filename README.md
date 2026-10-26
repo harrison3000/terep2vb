@@ -65,7 +65,7 @@ Comanche "voxel space" technique from `map.pcx` (heights) and `col.pcx` (colour 
 through its palette); below it the render scale and the options (the first time, the scale
 is 3 and `fix-ice-bug` is ticked). A click selects a directory, a double click enters it or
 plays the map, like the Play button (which needs a `car1.dat` too). The chooser
-lives in `host/` (`launcher.cpp`, `voxel_preview.cpp`, `pcx.cpp`, with its own PCX reader) and
+lives in `host/` (`launcher.cpp`, `voxel_preview.cpp`, reading the PCX files with `common/pcx`) and
 does not touch the game code.
 
 The chooser's choices (scale, minimap, sound, extra options and the last map) are
@@ -161,7 +161,7 @@ src/            the game (no OS or library dependencies)
   text.cpp      bitmap font
   sound.cpp     AdLib registers (the host decides what to do with them)
   car_file.cpp  the carN.dat format: car_read
-  load.cpp      PCX, map, fog/translucency tables, cars, game_init
+  load.cpp      the map's PCX layers into the segments, fog/translucency tables, cars, game_init
   game.cpp      one frame (views, text, keys) and the keyboard
 host/
   host.hpp      what the hosts share
@@ -172,11 +172,13 @@ host/
   launcher.cpp  map chooser (Dear ImGui) shown when no map is given
   prefs.cpp     the chooser's preferences file (prefs.txt, "key: value" per line)
   voxel_preview.cpp  the chooser's preview: the map's terrain in voxel space
-  pcx.cpp       PCX reader for the preview (separate from the game's)
   opl_sound.cpp the game's AdLib writes played through Nuked-OPL3 and SDL audio
   minimap.cpp   the optional minimap drawn over the game's picture
   imgui/        Dear ImGui (git submodule)
   Nuked-OPL3/   OPL3 emulator (git submodule, LGPL 2.1)
+common/
+  pcx.cpp       the PCX reader (8 bits, one plane): the game, the chooser's preview and the
+                web's renderer
 host_web/       the web host (WebAssembly): web_main.cpp, and the OpenGL renderer with WebGL 2,
                 gl_renderer.cpp and rz/ (the renderer)
 web/            the web page, what is served: index.html, terep2.js, webgl.js, shaders.js,
