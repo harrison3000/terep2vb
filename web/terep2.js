@@ -2,6 +2,7 @@
 // locally, nothing is uploaded), runs the game in terep2.wasm and draws it: the game's own
 // picture on a 2D canvas, or the OpenGL renderer's with WebGL 2 (webgl.js) and its text over it.
 import { webglImports } from './webgl.js';
+import { baseName, openAnniversary, trackFiles } from './anniversary.js';
 
 const $ = (id) => document.getElementById(id);
 const touchScreen = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
@@ -146,7 +147,7 @@ function drawMinimap() {
 }
 
 let wasm = null;                    // the module's exports
-let maps = new Map();               // folder path -> its File objects
+let maps = new Map();               // folder path -> its files ({ path, read })
 let playing = false, last = 0;
 let webgl = false;                  // this game is drawn by the OpenGL renderer
 let quality = 'high';               // ...in this quality (QUALITIES)
@@ -162,73 +163,181 @@ async function load() {
     wasm = instance.exports;
 }
 
-// The folders of the picked one that hold a map (map.pcx, col.pcx, car1.dat),
-// with their files: only the kinds of file the game reads (PCX images, .dat
-// tables and cars, sim.cfg); anything else in the folders is never read.
+// The folders of the picked one that hold a map (any of its files, the
+// missing ones shown), with their files: only the kinds of file the game
+// reads (PCX images, .dat tables and cars, sim.cfg); anything else in the
+// folders is never read.  A file is { path, read }: read() gives its
+// contents, an ArrayBuffer.
 const MAP_FILE = /\.(pcx|dat|cfg)$/i;
+const NEEDED = ['map.pcx', 'col.pcx', 'maptex.pcx'];         // without one of them, no map (load_map)
+const WANTED = ['textures.pcx', 'fog.dat', 'smoke.dat'];     // without them it plays, looking wrong
+const GL_ONLY = ['fog.dat', 'smoke.dat'];   // the software renderer's tables: without them, only OpenGL
+const fileNamed = (files, name) => files.find((f) => baseName(f.path).toLowerCase() === name);
 
-function findMaps(fileList) {
+function findMaps(files) {
     const dirs = new Map();
-    for (const f of fileList) {
-        if (!MAP_FILE.test(f.name))
+    for (const f of files) {
+        if (!MAP_FILE.test(f.path))
             continue;
-        const path = f.webkitRelativePath || f.name;
-        const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '.';
+        const dir = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '.';
         if (!dirs.has(dir))
             dirs.set(dir, []);
         dirs.get(dir).push(f);
     }
     const found = new Map();
     for (const [dir, files] of dirs) {
-        const names = new Set(files.map((f) => f.name.toLowerCase()));
-        if (names.has('map.pcx') && names.has('col.pcx') && names.has('car1.dat'))
+        const names = new Set(files.map((f) => baseName(f.path).toLowerCase()));
+        if ([...NEEDED, ...WANTED].some((n) => names.has(n)))
             found.set(dir, files);
     }
     return found;
 }
 
+const fromFile = (f, path) => ({ path: path || f.webkitRelativePath || f.name, read: () => f.arrayBuffer() });
+
+// The files of what is dropped on the page: files, folders (walked).
+async function droppedFiles(items) {
+    const files = [];
+    async function walk(entry) {
+        if (entry.isFile) {
+            const f = await new Promise((ok, fail) => entry.file(ok, fail));
+            files.push(fromFile(f, entry.fullPath.slice(1)));
+        } else if (entry.isDirectory) {
+            const reader = entry.createReader();
+            for (let batch; (batch = await new Promise((ok, fail) => reader.readEntries(ok, fail))).length;)
+                for (const e of batch)
+                    await walk(e);
+        }
+    }
+    // the entries before anything is awaited: the items are gone after the drop event
+    const entries = [...items].map((i) => i.webkitGetAsEntry?.() || i.getAsFile());
+    for (const entry of entries.filter(Boolean))
+        await (entry instanceof File ? files.push(fromFile(entry)) : walk(entry));
+    return files;
+}
+
+// What is missing from a map's files ([name, file]), and whether it can be
+// played with the renderer chosen.
+function checkMap(files) {
+    const missing = [...NEEDED, ...WANTED, 'car1.dat'].filter((n) => !files.some(([name]) => name.toLowerCase() === n));
+    const glOnly = missing.some((n) => GL_ONLY.includes(n));
+    const playable = !missing.some((n) => NEEDED.includes(n) || n === 'car1.dat')
+        && !(glOnly && $('renderer').value !== 'webgl');
+    return { playable, text: missing.length ? 'Missing: ' + missing.join(', ') + (glOnly ? ' (plays with WebGL only)' : '') : '' };
+}
+
+// A folder's map, as the game opens its files: by their names.
+const folderMap = (dir) => maps.get(dir).map((f) => [baseName(f.path), f]);
+
 function showMaps() {
     const list = $('maps');
     list.innerHTML = '';
     for (const dir of [...maps.keys()].sort()) {
+        const { playable, text } = checkMap(folderMap(dir));
         const b = document.createElement('button');
         b.textContent = dir;
-        b.onclick = () => play(dir);
+        b.disabled = !playable;
+        b.onclick = () => play(folderMap(dir));
         list.appendChild(b);
+        if (text) {
+            const p = document.createElement('div');
+            p.className = 'small missing';
+            p.textContent = text;
+            list.appendChild(p);
+        }
     }
-    $('none').hidden = maps.size > 0 || !$('folder').files.length;
+    $('none').hidden = maps.size > 0;
 }
 
-// Copies the map's files into the module and starts the game.  One at a
-// time: while a map loads, more clicks on the list do nothing.
+// The 30th Anniversary Edition's zip (anniversary.js): a track, a car and its
+// texture picked from it.  One car for now: car1.dat, car1.pcx.
+let anniversary = null;             // what openAnniversary gave
+let track = null;                   // the track picked: { choice, files }
+
+function fillSelect(select, choices, none) {
+    select.innerHTML = none ? `<option value="-1">${none}</option>` : '';
+    for (const [k, c] of choices.entries()) {
+        let group = [...select.children].find((g) => g.label === c.group);
+        if (!group) {
+            group = document.createElement('optgroup');
+            group.label = c.group;
+            select.appendChild(group);
+        }
+        group.appendChild(new Option(c.name.replace(/\.[^.]*$/, ''), k));
+    }
+}
+
+async function openZip(file) {
+    $('anniversary').hidden = true;
+    anniversary = await openAnniversary(file);
+    if (!anniversary.tracks.length || !anniversary.cars.length)
+        throw new Error('no track or no car in it: is it the 30th Anniversary Edition zip?');
+    fillSelect($('track'), anniversary.tracks);
+    fillSelect($('carModel'), anniversary.cars);
+    fillSelect($('carTexture'), anniversary.textures, 'None (textures.pcx)');
+    $('carModel').onchange();
+    $('anniversary').hidden = false;
+    await pickTrack();
+}
+
+// The track's files, read when it is picked (its zip is in the zip).
+async function pickTrack() {
+    const choice = anniversary.tracks[+$('track').value];
+    track = null;
+    showTrack();
+    const files = await trackFiles(choice);
+    if (anniversary.tracks[+$('track').value] === choice)      // not picked another meanwhile
+        track = { choice, files };
+    showTrack();
+}
+
+// The game's files: the track's, the shared ones it has not, the car.
+function anniversaryMap() {
+    const files = track.files.filter((f) => MAP_FILE.test(f.path)).map((f) => [baseName(f.path), f]);
+    for (const f of anniversary.shared)
+        if (!fileNamed(track.files, baseName(f.path).toLowerCase()))
+            files.push([baseName(f.path), f]);
+    files.push(['car1.dat', anniversary.cars[+$('carModel').value].file]);
+    if (+$('carTexture').value >= 0)
+        files.push(['car1.pcx', anniversary.textures[+$('carTexture').value].file]);
+    return files;
+}
+
+function showTrack() {
+    const { playable, text } = track ? checkMap(anniversaryMap()) : { playable: false, text: 'Reading the track...' };
+    $('playZip').disabled = !playable;
+    $('trackMissing').textContent = text;
+}
+
+// Copies the map's files ([name, file]) into the module and starts the game.
+// One at a time: while a map loads, more clicks do nothing.
 let loading = false;
 
-async function play(dir) {
+async function play(files) {
     if (loading || playing)
         return;
     loading = true;
-    $('maps').classList.add('loading');
+    $('chooser').classList.add('loading');
     try {
-        await loadGame(dir);
+        await loadGame(files);
     } catch (e) {
         console.error(e);
         alert('Could not start the game: ' + e);
     } finally {
         loading = false;
-        $('maps').classList.remove('loading');
+        $('chooser').classList.remove('loading');
     }
 }
 
-async function loadGame(dir) {
+async function loadGame(files) {
     if ($('sound').checked)
         startAudio();
     wasm.web_clear_files();
     const enc = new TextEncoder();
-    const files = maps.get(dir);
-    const contents = await Promise.all(files.map((f) => f.arrayBuffer()));    // all at once
-    for (const [k, f] of files.entries()) {
+    const contents = await Promise.all(files.map(([, f]) => f.read()));    // all at once
+    for (const [k, [fileName]] of files.entries()) {
         const data = new Uint8Array(contents[k]);
-        const name = enc.encode(f.name + '\0');
+        const name = enc.encode(fileName + '\0');
         const pname = wasm.web_alloc(name.length), pdata = wasm.web_alloc(data.length);
         new Uint8Array(wasm.memory.buffer, pname, name.length).set(name);
         new Uint8Array(wasm.memory.buffer, pdata, data.length).set(data);
@@ -471,10 +580,39 @@ if (touchScreen && document.fullscreenEnabled) {
 
 addEventListener('keydown', (e) => key(e, false));
 addEventListener('keyup', (e) => key(e, true));
-$('folder').onchange = () => {
-    maps = findMaps($('folder').files);
+function pick(promise) {
+    $('status').textContent = '';
+    promise.catch((e) => { $('status').textContent = 'Could not read the files: ' + e.message; });
+}
+function openFiles(files) {
+    maps = findMaps(files);
     showMaps();
+}
+$('folder').onchange = (e) => pick(Promise.resolve([...e.target.files].map((f) => fromFile(f))).then(openFiles));
+$('zip').onchange = (e) => e.target.files.length && pick(openZip(e.target.files[0]));
+$('track').onchange = () => pick(pickTrack());
+$('carModel').onchange = () => {      // the texture of the same name, if there is one
+    const stem = (c) => c.name.toLowerCase().replace(/\.[^.]*$/, '');
+    const car = anniversary.cars[+$('carModel').value];
+    const k = anniversary.textures.findIndex((t) => stem(t) === stem(car));
+    if (k >= 0)
+        $('carTexture').value = k;
+    showTrack();
 };
+$('carTexture').onchange = showTrack;
+$('playZip').onclick = () => play(anniversaryMap());
+// Dropped: a zip is the 30th Anniversary Edition's, anything else folders of maps.
+addEventListener('dragover', (e) => { if (!playing) e.preventDefault(); });
+addEventListener('drop', (e) => {
+    e.preventDefault();
+    const items = e.dataTransfer.items, file = items.length === 1 && items[0].getAsFile();
+    if (playing)
+        return;
+    if (file && /\.zip$/i.test(file.name))
+        pick(openZip(file));
+    else
+        pick(droppedFiles(items).then(openFiles));
+});
 $('distance').oninput = () => { $('distanceText').textContent = $('distance').value + ' tiles'; };
 $('quality').value = touchScreen ? 'medium' : 'high';    // a phone's GPU: until something else is chosen
 loadPrefs();
@@ -485,7 +623,7 @@ function showRendererOptions() {
     for (const e of document.querySelectorAll('.gl-only')) e.hidden = !gl;
     for (const e of document.querySelectorAll('.sw-only')) e.hidden = gl;
 }
-$('renderer').onchange = showRendererOptions;
+$('renderer').onchange = () => { showRendererOptions(); showMaps(); if (anniversary) showTrack(); };
 showRendererOptions();
 $('distance').oninput();
 load().catch((e) => { $('status').textContent = 'Could not load terep2.wasm: ' + e; });
