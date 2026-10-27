@@ -388,10 +388,9 @@ static void updateCars(){
         float steering = (float)car.steer_used.raw * (-6.28318531f / 65536.0f);
         rzUpdateObjectWheels(ctx, id, steering);
 
-        // wheel_speed: the ground the tyre rolls over in a tick, in the
-        // positions' 16.16 map units (the physics adds it to the velocity,
-        // and pos += vel every tick); rz takes tiles per 60 Hz frame, two ticks
-        float spd = F_8_24(car.wheel_speed[0]) * 2.0f;
+        // in theory the value should be 2, but it doesnt feel right
+        // 1.4 doesnt feel right either, but who cares
+        float spd = F_8_24(car.wheel_speed[0]) * 1.4f;
         rzSetObjectWheelSpin(ctx, id, spd);
 
         rzUpdateObjectVertices(ctx, id, ptrs);
