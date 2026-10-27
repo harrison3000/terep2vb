@@ -3,6 +3,7 @@
 // picture on a 2D canvas, or the OpenGL renderer's with WebGL 2 (webgl.js) and its text over it.
 import { webglImports } from './webgl.js';
 import { baseName, openAnniversary, trackFiles } from './anniversary.js';
+import { decodeCar, decodePcx, drawCar, drawPcx } from './preview.js';
 
 const $ = (id) => document.getElementById(id);
 const touchScreen = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
@@ -275,6 +276,8 @@ async function openZip(file) {
     fillSelect($('track'), anniversary.tracks);
     fillSelect($('carModel'), anniversary.cars);
     fillSelect($('carTexture'), anniversary.textures, 'None (textures.pcx)');
+    const textures = fileNamed(anniversary.shared, 'textures.pcx');
+    defaultTexture = textures && decodePcx(wasm, await textures.read());
     $('carModel').onchange();
     $('anniversary').hidden = false;
     await pickTrack();
@@ -286,10 +289,60 @@ async function pickTrack() {
     track = null;
     showTrack();
     const files = await trackFiles(choice);
-    if (anniversary.tracks[+$('track').value] === choice)      // not picked another meanwhile
-        track = { choice, files };
+    if (anniversary.tracks[+$('track').value] !== choice)      // another picked meanwhile
+        return;
+    track = { choice, files };
     showTrack();
+    await previewTrack();
 }
+
+// The previews: the track's colours (col.pcx, whose palette the car's
+// texture is shown in too), the car turning, its texture.
+let trackPalette = null, carShown = null, textureShown = null;
+
+async function previewTrack() {
+    const col = fileNamed(track.files, 'col.pcx'), shown = track;
+    const image = col && decodePcx(wasm, await col.read());
+    if (track !== shown)
+        return;
+    $('trackPreview').hidden = !image;
+    trackPalette = image?.palette;
+    if (image)
+        drawPcx($('trackPreview'), image, image.palette, 256, 256);   // the map's colours, as the game crops them
+    if (textureShown)
+        drawPcx($('texturePreview'), textureShown, trackPalette || textureShown.palette);
+}
+
+async function previewCar() {
+    const choice = anniversary.cars[+$('carModel').value];
+    const car = decodeCar(await choice.file.read());
+    if (anniversary.cars[+$('carModel').value] === choice)
+        carShown = car;
+}
+
+async function previewTexture() {
+    const choice = anniversary.textures[+$('carTexture').value];
+    const image = choice ? decodePcx(wasm, await choice.file.read()) : null;
+    if (anniversary.textures[+$('carTexture').value] !== choice)
+        return;
+    textureShown = image;
+    $('texturePreview').hidden = !image;
+    if (image)
+        drawPcx($('texturePreview'), image, trackPalette || image.palette);
+}
+
+// The texture the car is drawn with: the one picked, else textures.pcx
+// (the zip's), as in the game.
+let defaultTexture = null;
+
+function spinCar(now) {
+    if (carShown && !playing && !$('anniversary').hidden) {
+        const texture = textureShown || defaultTexture;
+        drawCar($('carPreview'), carShown, now / 2000, texture, trackPalette || texture?.palette);
+    }
+    requestAnimationFrame(spinCar);
+}
+requestAnimationFrame(spinCar);
 
 // The game's files: the track's, the shared ones it has not, the car.
 function anniversaryMap() {
@@ -598,8 +651,12 @@ $('carModel').onchange = () => {      // the texture of the same name, if there 
     if (k >= 0)
         $('carTexture').value = k;
     showTrack();
+    pick(Promise.all([previewCar(), previewTexture()]));
 };
-$('carTexture').onchange = showTrack;
+$('carTexture').onchange = () => {
+    showTrack();
+    pick(previewTexture());
+};
 $('playZip').onclick = () => play(anniversaryMap());
 // Dropped: a zip is the 30th Anniversary Edition's, anything else folders of maps.
 addEventListener('dragover', (e) => { if (!playing) e.preventDefault(); });

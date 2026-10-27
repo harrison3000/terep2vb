@@ -14,6 +14,8 @@
   #chooser.loading button { opacity: 0.5; cursor: progress; }
   #maps button:disabled, #playZip:disabled { opacity: 0.5; cursor: default; }
   .missing { margin: 0 0 8px 12px; color: #e9a; }
+  #previews { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin: 8px 0; }
+  #previews canvas { max-width: 192px; height: auto; image-rendering: pixelated; background: #000; }
   #playZip { padding: 6px 18px; font: inherit; cursor: pointer; }
   .small { color: #999; font-size: 0.9em; }
   .options label { display: block; margin: 4px 0; }   /* one option a line */
@@ -48,6 +50,11 @@
     <label>Track <select id="track"></select></label>
     <label>Car <select id="carModel"></select></label>
     <label>Car texture <select id="carTexture"></select></label>
+    <div id="previews">
+      <canvas id="trackPreview" width="256" height="256" title="The track (col.pcx)" hidden></canvas>
+      <canvas id="carPreview" width="256" height="192" title="The car"></canvas>
+      <canvas id="texturePreview" title="The car's texture" hidden></canvas>
+    </div>
     <p id="trackMissing" class="small missing"></p>
     <button id="playZip">Play</button>
   </div>
