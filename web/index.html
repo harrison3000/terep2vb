@@ -45,7 +45,12 @@
 <body>
 <div id="chooser">
   <h1>Terep2 Web</h1>
-  <p><label>The <b>Terep2 30th Anniversary Edition</b> zip <input type="file" id="zip" accept=".zip"></label></p>
+  <p class="options"><label>Load from <select id="source">
+    <option value="zip">The Terep2 30th Anniversary Edition zip</option>
+    <option value="folder">A track folder</option>
+  </select></label></p>
+  <div id="fromZip">
+  <p><input type="file" id="zip" accept=".zip"></p>
   <div id="anniversary" class="options" hidden>
     <label>Track <select id="track"></select></label>
     <label>Car <select id="carModel"></select></label>
@@ -58,10 +63,16 @@
     <p id="trackMissing" class="small missing"></p>
     <button id="playZip">Play</button>
   </div>
-  <p>Or a folder with maps (a map is a folder with <code>map.pcx</code>, <code>col.pcx</code> and
-  <code>car1.dat</code>). The zip or the folders can also be dropped on this page.
+  </div>
+  <div id="fromFolder" hidden>
+  <p>A folder with maps (a map is a folder with <code>map.pcx</code>, <code>col.pcx</code> and
+  <code>car1.dat</code>).</p>
+  <p><input type="file" id="folder" webkitdirectory multiple></p>
+  <div id="maps"></div>
+  <p id="none" class="small" hidden>No map found there.</p>
+  </div>
+  <p class="small">The zip or the folders can also be dropped on this page.
   The files are read here, in the browser: nothing is uploaded.</p>
-  <p><label>Folder <input type="file" id="folder" webkitdirectory multiple></label></p>
   <p class="options">
     <label>Renderer <select id="renderer">
       <option value="webgl">WebGL</option>
@@ -90,8 +101,6 @@
     <label><input type="checkbox" id="sound" checked> Sound</label>
     <label><input type="checkbox" id="minimapOn"> Minimap</label>
   </p>
-  <div id="maps"></div>
-  <p id="none" class="small" hidden>No map found there.</p>
   <p id="status" class="small"></p>
   <p class="small">Keys: arrows + keypad 5 drive car 1 (W Z A D S car 2...), 1 / 2 jump, F1–F5 cameras,
   F6 second view's camera, F9 split screen, F10 fog, Tab / Q change car, [ ] gravity.

@@ -560,7 +560,7 @@ function savePrefs() {
             scale: $('scale').value, fixice: $('fixice').checked, banner: $('banner').checked,
             sound: $('sound').checked, minimap: $('minimapOn').checked, renderer: $('renderer').value,
             quality: $('quality').value, frameskip: $('frameskip').checked,
-            distance: $('distance').value }));
+            distance: $('distance').value, source: $('source').value }));
     } catch (e) { /* private mode: not kept */ }
 }
 
@@ -576,6 +576,7 @@ function loadPrefs() {
         if (p.quality) $('quality').value = p.quality;
         if (p.frameskip !== undefined) $('frameskip').checked = p.frameskip;
         if (p.distance) $('distance').value = p.distance;
+        if (p.source) $('source').value = p.source;
     } catch (e) { /* nothing saved */ }
 }
 
@@ -641,6 +642,13 @@ function openFiles(files) {
     maps = findMaps(files);
     showMaps();
 }
+// Where the game is loaded from: the zip or a folder, each with its own file picker.
+function showSource(source) {
+    $('source').value = source;
+    $('fromZip').hidden = source !== 'zip';
+    $('fromFolder').hidden = source !== 'folder';
+}
+$('source').onchange = () => { showSource($('source').value); savePrefs(); };
 $('folder').onchange = (e) => pick(Promise.resolve([...e.target.files].map((f) => fromFile(f))).then(openFiles));
 $('zip').onchange = (e) => e.target.files.length && pick(openZip(e.target.files[0]));
 $('track').onchange = () => pick(pickTrack());
@@ -665,14 +673,14 @@ addEventListener('drop', (e) => {
     const items = e.dataTransfer.items, file = items.length === 1 && items[0].getAsFile();
     if (playing)
         return;
-    if (file && /\.zip$/i.test(file.name))
-        pick(openZip(file));
-    else
-        pick(droppedFiles(items).then(openFiles));
+    const zip = file && /\.zip$/i.test(file.name);
+    showSource(zip ? 'zip' : 'folder');
+    pick(zip ? openZip(file) : droppedFiles(items).then(openFiles));
 });
 $('distance').oninput = () => { $('distanceText').textContent = $('distance').value + ' tiles'; };
 $('quality').value = touchScreen ? 'medium' : 'high';    // a phone's GPU: until something else is chosen
 loadPrefs();
+showSource($('source').value);
 // Only the options of the chosen renderer: the scale is the software one's,
 // the quality and the draw distance the OpenGL one's.
 function showRendererOptions() {
