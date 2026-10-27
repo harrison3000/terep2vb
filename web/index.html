@@ -11,7 +11,12 @@
   #chooser { max-width: 40em; margin: 2em auto; padding: 0 16px; }
   h1 { font-size: 1.4em; }
   #maps button { display: block; margin: 4px 0; padding: 6px 12px; font: inherit; cursor: pointer; }
-  #maps.loading button { opacity: 0.5; cursor: progress; }
+  #chooser.loading button { opacity: 0.5; cursor: progress; }
+  #maps button:disabled, #playZip:disabled { opacity: 0.5; cursor: default; }
+  .missing { margin: 0 0 8px 12px; color: #e9a; }
+  #previews { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin: 8px 0; }
+  #previews canvas { max-width: 192px; height: auto; image-rendering: pixelated; background: #000; }
+  #playZip { padding: 6px 18px; font: inherit; cursor: pointer; }
   .small { color: #999; font-size: 0.9em; }
   .options label { display: block; margin: 4px 0; }   /* one option a line */
   #game { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }
@@ -40,9 +45,34 @@
 <body>
 <div id="chooser">
   <h1>Terep2 Web</h1>
-  <p>Pick a folder with maps (a map is a folder with <code>map.pcx</code>, <code>col.pcx</code> and
-  <code>car1.dat</code>). The files are read here, in the browser: nothing is uploaded.</p>
+  <p class="options"><label>Load from <select id="source">
+    <option value="zip">The Terep2 30th Anniversary Edition zip</option>
+    <option value="folder">A track folder</option>
+  </select></label></p>
+  <div id="fromZip">
+  <p><input type="file" id="zip" accept=".zip"></p>
+  <div id="anniversary" class="options" hidden>
+    <label>Track <select id="track"></select></label>
+    <label>Car <select id="carModel"></select></label>
+    <label>Car texture <select id="carTexture"></select></label>
+    <div id="previews">
+      <canvas id="trackPreview" width="256" height="256" title="The track (col.pcx)" hidden></canvas>
+      <canvas id="carPreview" width="256" height="192" title="The car"></canvas>
+      <canvas id="texturePreview" title="The car's texture" hidden></canvas>
+    </div>
+    <p id="trackMissing" class="small missing"></p>
+    <button id="playZip">Play</button>
+  </div>
+  </div>
+  <div id="fromFolder" hidden>
+  <p>A folder with maps (a map is a folder with <code>map.pcx</code>, <code>col.pcx</code> and
+  <code>car1.dat</code>).</p>
   <p><input type="file" id="folder" webkitdirectory multiple></p>
+  <div id="maps"></div>
+  <p id="none" class="small" hidden>No map found there.</p>
+  </div>
+  <p class="small">The zip or the folders can also be dropped on this page.
+  The files are read here, in the browser: nothing is uploaded.</p>
   <p class="options">
     <label>Renderer <select id="renderer">
       <option value="webgl">WebGL</option>
@@ -71,8 +101,6 @@
     <label><input type="checkbox" id="sound" checked> Sound</label>
     <label><input type="checkbox" id="minimapOn"> Minimap</label>
   </p>
-  <div id="maps"></div>
-  <p id="none" class="small" hidden>No map found in that folder.</p>
   <p id="status" class="small"></p>
   <p class="small">Keys: arrows + keypad 5 drive car 1 (W Z A D S car 2...), 1 / 2 jump, F1–F5 cameras,
   F6 second view's camera, F9 split screen, F10 fog, Tab / Q change car, [ ] gravity.

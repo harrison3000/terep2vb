@@ -13,7 +13,8 @@ CXXFLAGS += -std=gnu++17 -fwrapv -Wall -Wno-unused-result
 DEPFLAGS  = -MMD -MP                    # header (and #embed) dependencies, in the .d files
 
 GAME     := $(wildcard src/*.cpp)
-GAME_OBJ := $(patsubst src/%.cpp,build/game/%.o,$(GAME))
+# common/: code the game and the hosts share (the PCX reader), built with the game
+GAME_OBJ := $(patsubst src/%.cpp,build/game/%.o,$(GAME)) $(patsubst common/%.cpp,build/game/common_%.o,$(wildcard common/*.cpp))
 HOST_OBJ := build/host/common.o
 TEST_OBJ := $(patsubst host_test/%.cpp,build/test/%.o,$(wildcard host_test/*.cpp))
 
@@ -24,6 +25,8 @@ build build/game build/host build/test build/sdl build/imgui/backends:
 
 # The game and what the hosts share.
 build/game/%.o: src/%.cpp | build/game
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
+build/game/common_%.o: common/%.cpp | build/game
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
 build/host/%.o: host/%.cpp | build/host
 	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c -o $@ $<
@@ -41,7 +44,7 @@ GL_LIBS  := -lGL
 endif
 IMGUI    := host/imgui
 OPL3     := host/Nuked-OPL3
-SDL_SRC  := sdl_main launcher prefs voxel_preview pcx opl_sound minimap gui renderer_sw
+SDL_SRC  := sdl_main launcher prefs voxel_preview opl_sound minimap gui renderer_sw
 SDL_OBJ  := $(patsubst %,build/sdl/%.o,$(SDL_SRC))
 SDL_FLAGS = $(CXXFLAGS) $(shell sdl2-config --cflags) -I$(IMGUI) -I$(IMGUI)/backends -I$(OPL3)
 IMGUI_OBJ := $(patsubst $(IMGUI)/%.cpp,build/imgui/%.o,$(addprefix $(IMGUI)/,imgui.cpp imgui_draw.cpp \
@@ -87,6 +90,9 @@ COV_SHOW      := build/cov/terep2-headless -instr-profile=build/cov/all.profdata
 build/cov/game/%.o: src/%.cpp
 	@mkdir -p $(@D)
 	$(COV_CXX) $(COV_FLAGS) $(DEPFLAGS) -c -o $@ $<
+build/cov/game/common_%.o: common/%.cpp
+	@mkdir -p $(@D)
+	$(COV_CXX) $(COV_FLAGS) $(DEPFLAGS) -c -o $@ $<
 build/cov/host/%.o: host/%.cpp
 	@mkdir -p $(@D)
 	$(COV_CXX) $(COV_FLAGS) $(DEPFLAGS) -c -o $@ $<
@@ -117,6 +123,9 @@ WASM_FLAGS   := --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 -std=gnu++1
 WASM_OBJ     := $(patsubst build/%,build/wasm/%,$(GAME_OBJ) $(HOST_OBJ) $(TEST_OBJ))
 
 build/wasm/game/%.o: src/%.cpp
+	@mkdir -p $(@D)
+	$(WASM_CXX) $(WASM_FLAGS) $(DEPFLAGS) -c -o $@ $<
+build/wasm/game/common_%.o: common/%.cpp
 	@mkdir -p $(@D)
 	$(WASM_CXX) $(WASM_FLAGS) $(DEPFLAGS) -c -o $@ $<
 build/wasm/host/%.o: host/%.cpp

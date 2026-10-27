@@ -20,8 +20,6 @@
 #include <vector>
 #include "fixed.hpp"
 
-#define PACKED __attribute__((packed))
-
 /* ---------------------------------------------------------------------------
  * Vectors and positions
  * ------------------------------------------------------------------------- */
@@ -140,18 +138,6 @@ struct PointBuf {
 struct SpriteQuad {          /* camera-facing textured square (smoke; model opcode 9) */
     int16_t  size;                  /* half the side, before dividing by the depth */
     TexCoord uv[4];                 /* corner texture coordinates */
-};
-
-struct PACKED PcxHeader {
-    uint8_t  manufacturer, version, encoding, bits_per_pixel;
-    uint16_t xmin, ymin, xmax, ymax;
-    uint16_t hdpi, vdpi;
-    uint8_t  ega_palette[48];
-    uint8_t  reserved;
-    uint8_t  planes;
-    uint16_t bytes_per_line;
-    uint16_t palette_type;
-    uint8_t  filler[58];
 };
 
 

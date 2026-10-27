@@ -19,6 +19,7 @@
 #include <string>
 #include <strings.h>
 #include <vector>
+#include "../common/pcx.hpp"
 #include "../host/host.hpp"
 #include "web.hpp"
 extern "C" {
@@ -292,6 +293,17 @@ EXPORT("web_minimap") const uint32_t *web_minimap()
     }
     return pixels;
 }
+
+// A PCX image decoded for the page's previews, with the game's decoder:
+// web_pcx takes the file (from web_alloc, not kept), then its size, its
+// pixels (palette indices, row by row) and its palette (768 bytes of RGB,
+// null if it has none).
+static PcxImage preview;
+EXPORT("web_pcx") bool web_pcx(const uint8_t *file, size_t size) { return preview.decode(file, size); }
+EXPORT("web_pcx_width") int web_pcx_width() { return preview.width; }
+EXPORT("web_pcx_height") int web_pcx_height() { return preview.height; }
+EXPORT("web_pcx_pixels") const uint8_t *web_pcx_pixels() { return preview.pixels.data(); }
+EXPORT("web_pcx_palette") const uint8_t *web_pcx_palette() { return preview.palette.empty() ? nullptr : preview.palette.data(); }
 
 // The cars for the minimap: where each one's reference point is, in map
 // cells (0..256, x to the right, y down), and where it points, in 32 steps
