@@ -48,6 +48,9 @@ function wasiImports(getMemory) {
         },
         fd_close: () => 0,
         fd_seek: () => 70,          // ESPIPE: no files here
+        fd_prestat_get: () => 8,    // EBADF: no directories (wasi-libc asks once fopen is linked in)
+        fd_prestat_dir_name: () => 8,
+        proc_exit(code) { throw new Error('terep2.wasm exited with ' + code); },
         fd_fdstat_get(fd, p) {      // 1 and 2 are terminals (line by line), nothing else is open
             if (fd !== 1 && fd !== 2)
                 return 8;           // EBADF
