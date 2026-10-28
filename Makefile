@@ -160,7 +160,7 @@ build/wasm/rz/%.o: host_web/rz/%.cpp
 	$(WASM_CXX) $(RZ_WEB_FLAGS) $(DEPFLAGS) -c -o $@ $<
 build/wasm/opl3.o: $(OPL3)/opl3.c | $(OPL3)/opl3.h
 	@mkdir -p $(@D)
-	$(WASM_CC) --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 $(DEPFLAGS) -c -o $@ $<
+	$(WASM_CC) --target=wasm32-wasip1 --sysroot=$(WASI_SYSROOT) -O2 -DOPL_WF_TABLE_RUNTIME=1 $(DEPFLAGS) -c -o $@ $<
 web/terep2.wasm: $(WEB_OBJ)
 	$(WASM_CXX) $(WASM_FLAGS) -mexec-model=reactor -Wl,--strip-debug -o $@ $^
 web: web/terep2.wasm
