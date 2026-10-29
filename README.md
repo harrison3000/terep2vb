@@ -107,6 +107,11 @@ screen's resolution; the default on a touch screen) or low (one of 512 up to 20 
 resolution). No map preview; Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
 the replays give the same frames as the Win16 port there too.
 
+The page links to a car editor (`web/car_editor/`: `index.html`, `cartool.js`): a carN.dat as text, with
+sections for the header, the vertices, the springs and the drawing program (BASIC-like, the
+points as `vertex[n]`), to edit and turn into a .dat again; a file decoded and encoded unchanged
+comes out byte for byte the same (all the cars in data/ do).
+
 ### Higher resolution
 
 The render scale N (the chooser, the Esc menu; `-s N` in the test host) renders at 320·N x 200·N. Scale 1 is the original, byte for byte. At

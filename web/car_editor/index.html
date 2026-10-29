@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Car Editor</title>
+<style>
+  :root { color-scheme: dark; --bg: #111; --fg: #ddd; --dim: #999; --bad: #f77; --ok: #7d7; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 70em; margin: 1.5em auto; padding: 0 16px; }
+  h1 { font-size: 1.4em; margin: 0 0 0.5em; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0.6em 0; }
+  button, label.button { font: inherit; padding: 5px 12px; cursor: pointer; }
+  textarea { width: 100%; height: 70vh; box-sizing: border-box; background: #000; color: var(--fg);
+             font: 13px/1.35 ui-monospace, monospace; border: 1px solid #333; padding: 8px; tab-size: 4; }
+  .small { color: var(--dim); font-size: 0.9em; }
+  #message.bad { color: var(--bad); }
+  #message.ok { color: var(--ok); }
+  a { color: #8cf; }
+  .warning { background: #3a2a00; border: 1px solid #a70; color: #fd8; padding: 8px 12px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Car Editor</h1>
+  <p class="warning"><b>Warning:</b> the text format is not stable yet and may change at any time,
+  without notice. Keep your cars as .dat files; a text saved now may not open in a later version.</p>
+  <p class="small">Open a car file (carN.dat): it is turned into text here, in the browser (nothing is
+  uploaded). Edit it and save it as a .dat again; the text can be saved and opened too. A file
+  opened and saved unchanged comes out byte for byte the same.
+  <a href="../">Back to the game</a>.</p>
+  <div class="bar">
+    <input type="file" id="open" accept=".dat,.DAT,.txt">
+    <button id="saveDat">Save .dat</button>
+    <button id="saveText">Save text</button>
+    <span id="message"></span>
+  </div>
+  <textarea id="text" spellcheck="false" placeholder="Open a carN.dat, or drop it here."></textarea>
+  <details class="small">
+    <summary>The text</summary>
+    <p>Four sections. <b>header</b>: drive (rear, front, all), the unknown word at 0x06, and the
+    game's state bytes when they are not zero. <b>vertices</b>: <code>vertex[i] = (x, y, z) radius r
+    body | reference | wheel front | wheel back [velocity (x, y, z)]</code>, in tiles (a map cell: the OpenGL renderer's
+    scale), as decimals; the reference vertex is where
+    the in-car camera sits. <b>springs</b>: <code>spring vertex[a] - vertex[b]: type t shift s rest r
+    last l min m max n</code> (type 0: a rope between min and max; 1: a spring that bends or breaks;
+    more: a damper). <b>program</b>: how the car is drawn, one instruction a line:</p>
+    <pre>pixel P color c                    nearer P, P          facing P, P, P
+flat color 0x0c0c: P, P, ..., P     (the last point closes the polygon; 0xf0f0 and up: glass)
+shaded: P shade, P shade, ...       shaded_tab base b: P index, ...
+textured: P (u, v), P (u, v), ...   (texels of the car's .pcx)
+sprite P size s: (u, v) (u, v) (u, v) (u, v)
+wheel P, P   and nine lines   view w0 w1: (u, v) (u, v) (u, v) (u, v)
+sort2 La, Lb     goto L     gosub L     if visible goto L     if hidden goto L
+nop     end     data 0x.., 0x..     L123:   (a label)</pre>
+    <p>Points: <code>vertex[i]</code>, <code>shadow[i]</code> (its shadow on the ground),
+    <code>axle[0]</code>, <code>axle[1]</code> (the front axle, steered), <code>point[k]</code>.
+    "visible" and "hidden" are the result of the last facing or nearer test. Everything after a #
+    is a comment.</p>
+  </details>
+</main>
+<script type="module">
+import { decode, encode } from './cartool.js';
+
+const $ = (id) => document.getElementById(id);
+let name = 'car1';
+
+function say(text, ok) {
+    $('message').textContent = text;
+    $('message').className = ok ? 'ok' : 'bad';
+}
+
+async function open(file) {
+    name = file.name.replace(/\.[^.]*$/, '');
+    const data = await file.arrayBuffer();
+    if (/\.txt$/i.test(file.name)) {
+        $('text').value = new TextDecoder().decode(data);
+        say(`${file.name} opened`, true);
+        return;
+    }
+    try {
+        $('text').value = decode(data);
+        say(`${file.name}: ${data.byteLength} bytes`, true);
+    } catch (e) {
+        say(`${file.name}: ${e.message}`);
+    }
+}
+
+function download(bytes, filename, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type }));
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// the line of an error, selected in the text
+function showLine(line) {
+    const t = $('text'), lines = t.value.split('\n');
+    const start = lines.slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0);
+    t.focus();
+    t.setSelectionRange(start, start + (lines[line - 1] || '').length);
+}
+
+$('open').onchange = () => { if ($('open').files[0]) open($('open').files[0]); };
+$('saveDat').onclick = () => {
+    try {
+        const bytes = encode($('text').value);
+        download(bytes, name + '.dat', 'application/octet-stream');
+        say(`${name}.dat: ${bytes.length} bytes`, true);
+    } catch (e) {
+        say(e.message);
+        if (e.line)
+            showLine(e.line);
+    }
+};
+$('saveText').onclick = () => download($('text').value, name + '.txt', 'text/plain');
+addEventListener('dragover', (e) => e.preventDefault());
+addEventListener('drop', (e) => {
+    e.preventDefault();
+    if (e.dataTransfer.files[0])
+        open(e.dataTransfer.files[0]);
+});
+</script>
+</body>
+</html>
