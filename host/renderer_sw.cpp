@@ -2,6 +2,7 @@
 // goes through the palette into a texture shown as large as the window
 // allows, keeping its shape.
 #include <algorithm>
+#include <cmath>
 #include <vector>
 #include "renderer_sw.hpp"
 #include "gui.hpp"
@@ -28,8 +29,13 @@ bool software_frame(int win_w, int win_h, PictureRect *where)
         rgba[i] = 0xff000000u | (uint32_t)c[2] << 16 | (uint32_t)c[1] << 8 | c[0];
     }
     picture->upload(rgba.data(), w, h, false);
-    const float k = std::min((float)win_w / w, (float)win_h / h);
-    *where = { (win_w - w * k) / 2, (win_h - h * k) / 2, k };
+    // pixel perfect: a whole number of window pixels per pixel, the largest
+    // that fits (a black border rather than uneven pixels); smaller only when
+    // the window cannot hold the picture at all
+    float k = std::min((float)win_w / w, (float)win_h / h);
+    if (k >= 1)
+        k = std::floor(k);
+    *where = { std::floor((win_w - w * k) / 2), std::floor((win_h - h * k) / 2), k };
     ImGui::GetBackgroundDrawList()->AddImage(picture->id(), ImVec2(where->x0, where->y0),
                                              ImVec2(where->x0 + w * k, where->y0 + h * k));
     return true;

@@ -528,11 +528,19 @@ function frame(now) {
         const pixels = new Uint8ClampedArray(wasm.memory.buffer, wasm.web_picture(), w * h * 4);
         picture.getContext('2d').putImageData(new ImageData(pixels, w, h), 0, 0);
         // as large as the window allows, keeping the shape, pixels left sharp
-        const screen = $('screen'), k = Math.min(innerWidth / w, innerHeight / h);
+        // pixel perfect: a whole number of device pixels per pixel, the
+        // largest that fits (a black border rather than uneven pixels);
+        // smaller only when the window cannot hold the picture at all
+        const screen = $('screen'), dpr = devicePixelRatio;
+        let k = Math.min(innerWidth * dpr / w, innerHeight * dpr / h);
+        if (k >= 1)
+            k = Math.floor(k);
         const sw = Math.floor(w * k), sh = Math.floor(h * k);
         if (screen.width !== sw || screen.height !== sh) {     // setting the size reallocates it
             screen.width = sw;
             screen.height = sh;
+            screen.style.width = sw / dpr + 'px';
+            screen.style.height = sh / dpr + 'px';
         }
         const ctx = screen.getContext('2d');
         ctx.imageSmoothingEnabled = false;
