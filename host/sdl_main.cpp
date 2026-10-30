@@ -1,37 +1,32 @@
 /*
- * SDL2 host: a window, the keyboard and the original timing (physics at
- * 120 Hz, display at 60 Hz, as in the Win16 port).
+ * SDL2 host, a controllable tester: a window, the keyboard, the sound and the
+ * original timing (physics at 120 Hz, display at 60 Hz, as in the Win16
+ * port).  The web page (host_web/) is the game's main host.
  *
- *   terep2vb [mapdir]
+ *   terep2vb [-s scale] [-E option]... [-n] mapdir
  *
- * Opens the map chooser (launcher.cpp) with the saved preferences
- * (prefs.hpp), at mapdir with it selected if given, else where the last map
- * was chosen.
+ * -s scale: render at 320*scale x 200*scale (1..MAX_RENDER_SCALE, default 1).
+ * -E option, --extra-options option: turn on an extra option (see
+ * extra_option_list), such as a fix of a bug of the original, or "all".
+ * -n: no sound.
  *
- * Esc pauses the game with a menu: the render scale and the minimap; Esc
- * again resumes, and its button goes back to the chooser.
+ * Esc or closing the window quits.
  */
 #include <algorithm>
-#include <climits>
-#include <filesystem>
+#include <cstdio>
 #include <cstdlib>
-#include <string>
+#include <string_view>
 #include <unistd.h>
 #include <vector>
 #include <SDL.h>
 #include "host.hpp"
-#include "renderer_sw.hpp"
-#include "gui.hpp"
-#include "launcher.hpp"
-#include "minimap.hpp"
 #include "opl_sound.hpp"
-#include "prefs.hpp"
 
 constexpr int MIN_ZOOM = 3;                // a 320x200 picture opens at least this many times bigger
 
-// Initial window size: the picture at the chosen scale, enlarged by a whole
-// factor while it is smaller than 320x200 x MIN_ZOOM, then reduced by a
-// whole factor while it does not fit on the screen.
+// Initial window size: the picture enlarged by a whole factor while it is
+// smaller than 320x200 x MIN_ZOOM, then reduced by a whole factor while it
+// does not fit on the screen.
 static void window_size(int *w, int *h)
 {
     int zoom = (MIN_ZOOM + render_scale - 1) / render_scale, div = 1;
@@ -96,176 +91,142 @@ static uint8_t pc_scancode(SDL_Scancode s)
     return 0;
 }
 
-enum class Ending { BACK, QUIT, FAILED };   // Esc, window closed, could not start
-
-// The window resized for the current render_scale, centred.
-static void fit_window()
+// Where the picture goes in a window of win_w x win_h: pixel perfect, a
+// whole number of window pixels per game pixel, the largest that fits (a
+// black border rather than uneven pixels); smaller only when the window
+// cannot hold the picture at all.
+static SDL_Rect picture_rect(int win_w, int win_h)
 {
-    int w, h;
-    window_size(&w, &h);
-    SDL_SetWindowSize(gui_window(), w, h);
-    SDL_SetWindowPosition(gui_window(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    const int w = screen_w(), h = screen_h();
+    float k = std::min((float)win_w / w, (float)win_h / h);
+    if (k >= 1)
+        k = (float)(int)k;
+    const int pw = (int)(w * k), ph = (int)(h * k);
+    return { (win_w - pw) / 2, (win_h - ph) / 2, pw, ph };
 }
 
-// The Esc menu: the game is paused while it is open, and Esc resumes it.
-// The scale and the minimap.  Returns true when its button ends the game.
-static bool esc_menu(HostOptions *host, Minimap **mini, bool *open)
+// The game loop: physics at 120 Hz, the picture at 60 Hz, until Esc, the
+// window is closed or the game ends.
+static void run(SDL_Renderer *ren)
 {
-    bool end = false;
-    const ImGuiViewport *vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::Begin("Paused", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
-                                        ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings);
-    int scale = render_scale;
-    ImGui::SetNextItemWidth(200);
-    ImGui::SliderInt("Render scale", &scale, 1, MAX_RENDER_SCALE, "%dx");
-    if (scale != render_scale)
-        game_set_scale(scale);
-    if (ImGui::IsItemDeactivatedAfterEdit())
-        fit_window();
-    ImGui::SameLine();
-    ImGui::TextDisabled("%d x %d", screen_w(), screen_h());
-    if (ImGui::Checkbox("Minimap", &host->minimap)) {
-        delete *mini;
-        *mini = host->minimap ? new Minimap() : nullptr;
+    const int w = screen_w(), h = screen_h();
+    SDL_Texture *tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_ABGR8888, SDL_TEXTUREACCESS_STREAMING, w, h);
+    if (!tex) {
+        fprintf(stderr, "SDL: %s\n", SDL_GetError());
+        return;
     }
-    ImGui::Spacing();
-    if (ImGui::Button("Resume (Esc)", ImVec2(120, 0)))
-        *open = false;
-    ImGui::SameLine();
-    if (ImGui::Button("Back to the map chooser", ImVec2(0, 0)))
-        end = true;
-    ImGui::End();
-    return end;
-}
-
-// The game loop: physics at 120 Hz, the picture at 60 Hz.  Esc opens the
-// menu above.
-static Ending run(HostOptions *host)
-{
-    if (!software_start())
-        return Ending::FAILED;
-    Minimap *mini = host->minimap ? new Minimap() : nullptr;
+    std::vector<uint32_t> rgba((size_t)w * h);
 
     const uint64_t freq = SDL_GetPerformanceFrequency();
     uint64_t next_tick = SDL_GetPerformanceCounter(), next_frame = next_tick;
-    Ending end = Ending::BACK;
-    bool menu = false;
     for (bool running = true; running;) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            gui_event(e);
             if (e.type == SDL_QUIT) {
-                end = Ending::QUIT;
                 running = false;
             } else if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
                 uint8_t sc = pc_scancode(e.key.keysym.scancode);
-                if (sc == 0x01) {
-                    if (e.type == SDL_KEYDOWN && !e.key.repeat)
-                        menu = !menu;           // pause / resume
-                } else if (sc && (e.type == SDL_KEYUP || !menu)) {
-                    game_key(e.type == SDL_KEYUP ? sc | 0x80 : sc);     // releases always: no stuck keys
-                }
+                if (sc == 0x01)
+                    running = false;
+                else if (sc)
+                    game_key(e.type == SDL_KEYUP ? sc | 0x80 : sc);
             }
         }
 
         uint64_t now = SDL_GetPerformanceCounter();
-        while (now >= next_tick) {          // 120 Hz physics, stopped while the menu is open
-            if (!menu)
-                physics_tick();
+        while (now >= next_tick) {          // 120 Hz physics
+            physics_tick();
             next_tick += freq / 120;
         }
         if (now >= next_frame) {            // 60 Hz display
             next_frame += freq / 60;
             if (now > next_frame + freq / 4)
                 next_frame = now;           // do not try to catch up after a stall
-            gui_begin();
-            const ImVec2 win = ImGui::GetIO().DisplaySize;
-            PictureRect at;
-            if (!software_frame((int)win.x, (int)win.y, &at))
-                running = false;
-            // the menu first: turning the minimap off deletes its texture, which
-            // must not be in this frame's draw lists any more
-            if (menu && esc_menu(host, &mini, &menu))
-                running = false;
-            if (mini)
-                mini->draw(ImGui::GetForegroundDrawList(), at.x0, at.y0, at.k, screen_w(), screen_h());
-            gui_end();
+            if (game_frame())
+                break;
+            const uint8_t *scr = screen();
+            for (int i = 0; i < w * h; i++) {
+                const uint8_t *c = host_palette(scr[i]);
+                rgba[i] = 0xff000000u | (uint32_t)c[2] << 16 | (uint32_t)c[1] << 8 | c[0];
+            }
+            SDL_UpdateTexture(tex, nullptr, rgba.data(), w * 4);
+            int win_w, win_h;
+            SDL_GetRendererOutputSize(ren, &win_w, &win_h);
+            SDL_Rect at = picture_rect(win_w, win_h);
+            SDL_SetRenderDrawColor(ren, 0, 0, 0, 255);
+            SDL_RenderClear(ren);
+            SDL_RenderCopy(ren, tex, nullptr, &at);
+            SDL_RenderPresent(ren);
         } else {
             SDL_Delay(1);
         }
     }
-    delete mini;
-    software_stop();
-    return end;
+    SDL_DestroyTexture(tex);
 }
 
-// One game on map, from a fresh state, until Esc or the window is
-// closed; everything it used is freed again.
-static Ending play(const std::string &map, HostOptions &host)
+static int usage(const char *prog)
 {
-    char here[PATH_MAX];
-    if (!getcwd(here, sizeof here))
-        return Ending::FAILED;
-    if (!host.no_sound)
-        opl_sound_start();                          // before game_init, which sets up the AdLib
-    Ending end = Ending::FAILED;
-    if (!host_init_state()) {
-        opl_sound_stop();
-        return end;
-    }
-    if (chdir(map.c_str()) != 0)
-        perror(map.c_str());
-    else if (game_init() != 0 || world.num_cars <= 0)
-        fprintf(stderr, "could not load the map in %s (no car1.dat?)\n", map.c_str());
-    else
-        end = run(&host);
-    opl_sound_stop();
-    host_free_game();
-    if (chdir(here) != 0)
-        perror(here);
-    return end;
+    fprintf(stderr, "usage: %s [-s 1..%d] [-E option]... [-n] mapdir\n", prog, MAX_RENDER_SCALE);
+    return 2;
 }
 
 int main(int argc, char **argv)
 {
-    // the chooser's defaults, then the saved preferences; a map directory
-    // given on the command line is where the chooser opens
-    std::string map;
-    HostOptions host;
-    render_scale = 3;
-    extra_options.fix_ice_bug = true;
-    prefs_load(&host, &map);
-    if (argc > 1) {
-        std::error_code ec;
-        std::filesystem::path p = std::filesystem::absolute(argv[1], ec).lexically_normal();
-        if (!p.has_filename())                      // "dir/"
-            p = p.parent_path();
-        map = ec ? argv[1] : p.string();
+    int a = 1;
+    bool sound = true;
+    render_scale = 1;
+    for (; a < argc && argv[a][0] == '-'; a++) {
+        std::string_view opt = argv[a];
+        if (opt == "-n") {
+            sound = false;
+        } else if (a + 1 >= argc) {
+            return usage(argv[0]);
+        } else if (opt == "-s") {
+            render_scale = atoi(argv[++a]);
+        } else if (opt != "-E" && opt != "--extra-options") {
+            return usage(argv[0]);
+        } else if (!extra_option_enable(argv[++a])) {
+            fprintf(stderr, "unknown option %s; known:", argv[a]);
+            for (int i = 0; i < extra_option_count; i++)
+                fprintf(stderr, " %s", extra_option_list[i].name);
+            fprintf(stderr, " all\n");
+            return 2;
+        }
     }
+    if (argc - a != 1 || render_scale < 1 || render_scale > MAX_RENDER_SCALE)
+        return usage(argv[0]);
+    const char *map = argv[a];
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
         fprintf(stderr, "SDL: %s\n", SDL_GetError());
         return 1;
     }
-    SDL_Window *win = gui_open(320 * MIN_ZOOM, 200 * MIN_ZOOM);
-    if (!win)
+    if (sound)
+        opl_sound_start();                          // before game_init, which sets up the AdLib
+    if (!host_init_state())
         return 1;
-    // Esc in a game goes back to the chooser, for another map
-    for (;;) {
-        SDL_SetWindowSize(win, 320 * MIN_ZOOM, 200 * MIN_ZOOM);
-        SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-        if (!launcher_run(&map, &host))
-            break;
-        int win_w, win_h;
-        window_size(&win_w, &win_h);                // for the scale chosen there
-        SDL_SetWindowSize(win, win_w, win_h);
-        SDL_SetWindowPosition(win, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-        prefs_save(host, map);                      // what was chosen, if it changed
-        if (play(map, host) == Ending::QUIT)
-            break;
+    if (chdir(map) != 0) {
+        perror(map);
+        return 1;
     }
-    gui_close();
+    if (game_init() != 0 || world.num_cars <= 0) {
+        fprintf(stderr, "could not load the map in %s (no car1.dat?)\n", map);
+        return 1;
+    }
+
+    int win_w, win_h;
+    window_size(&win_w, &win_h);
+    SDL_Window *win = SDL_CreateWindow("Terep2 vibe code edition", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                       win_w, win_h, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+    SDL_Renderer *ren = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_PRESENTVSYNC) : nullptr;
+    if (!ren) {
+        fprintf(stderr, "SDL: %s\n", SDL_GetError());
+        return 1;
+    }
+    run(ren);
+    opl_sound_stop();
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
     SDL_Quit();
     return 0;
 }

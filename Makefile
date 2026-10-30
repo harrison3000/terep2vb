@@ -1,7 +1,7 @@
 # terep2 in C++ ("C with classes").
 #   make            headless test host, terep2-headless (no dependencies)
-#   make sdl        SDL2 version (needs SDL2 development files, OpenGL and the submodules:
-#                   host/imgui, host/Nuked-OPL3)
+#   make sdl        SDL2 test host, terep2vb (needs SDL2 development files and the submodule
+#                   host/Nuked-OPL3)
 #   make test       replay the Win16 recordings in tests/ and compare the frames
 #   make coverage   which lines of src/ the tests run (clang/LLVM); REPLAY="recdir mapdir": a recording's
 #   make web        the game as a web page (web/terep2.wasm; serve web/ and open it)
@@ -20,7 +20,7 @@ TEST_OBJ := $(patsubst host_test/%.cpp,build/test/%.o,$(wildcard host_test/*.cpp
 
 all: terep2-headless
 
-build build/game build/host build/test build/sdl build/imgui/backends:
+build build/game build/host build/test build/sdl:
 	@mkdir -p $@
 
 # The game and what the hosts share.
@@ -36,22 +36,13 @@ build/test/%.o: host_test/%.cpp | build/test
 terep2-headless: $(GAME_OBJ) $(HOST_OBJ) $(TEST_OBJ)
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
 
-# The SDL host and its map chooser (OpenGL 3.3); Dear ImGui is the git submodule in host/imgui.
-ifeq ($(OS),Windows_NT)
-GL_LIBS  := -lopengl32
-else
-GL_LIBS  := -lGL
-endif
-IMGUI    := host/imgui
+# The SDL host: a controllable tester (window, keyboard, sound), with the OPL3 emulator, the git
+# submodule in host/Nuked-OPL3.
 OPL3     := host/Nuked-OPL3
-SDL_SRC  := sdl_main launcher prefs voxel_preview opl_sound minimap gui renderer_sw
+SDL_SRC  := sdl_main opl_sound
 SDL_OBJ  := $(patsubst %,build/sdl/%.o,$(SDL_SRC))
-SDL_FLAGS = $(CXXFLAGS) $(shell sdl2-config --cflags) -I$(IMGUI) -I$(IMGUI)/backends -I$(OPL3)
-IMGUI_OBJ := $(patsubst $(IMGUI)/%.cpp,build/imgui/%.o,$(addprefix $(IMGUI)/,imgui.cpp imgui_draw.cpp \
-             imgui_tables.cpp imgui_widgets.cpp backends/imgui_impl_sdl2.cpp backends/imgui_impl_opengl3.cpp))
+SDL_FLAGS = $(CXXFLAGS) $(shell sdl2-config --cflags) -I$(OPL3)
 
-$(IMGUI)/imgui.h:
-	@echo "Dear ImGui is missing: git submodule update --init" >&2; false
 $(OPL3)/opl3.h:
 	@echo "Nuked-OPL3 is missing: git submodule update --init" >&2; false
 
@@ -61,17 +52,14 @@ build/sdl/flags: FORCE | build/sdl
 	@echo '$(SDL_FLAGS)' | cmp -s - $@ || echo '$(SDL_FLAGS)' > $@
 FORCE:
 
-build/sdl/%.o: host/%.cpp build/sdl/flags | build/sdl $(IMGUI)/imgui.h $(OPL3)/opl3.h
+build/sdl/%.o: host/%.cpp build/sdl/flags | build/sdl $(OPL3)/opl3.h
 	$(CXX) $(SDL_FLAGS) $(DEPFLAGS) -c -o $@ $<
-build/imgui/%.o: $(IMGUI)/%.cpp | build/imgui/backends $(IMGUI)/imgui.h
-	$(CXX) -O2 -std=gnu++17 $(shell sdl2-config --cflags) -I$(IMGUI) $(DEPFLAGS) -c -o $@ $<
 build/opl3.o: $(OPL3)/opl3.c | build $(OPL3)/opl3.h
 	$(CC) -O2 $(DEPFLAGS) -c -o $@ $<
 
 sdl: terep2vb
-terep2vb: $(GAME_OBJ) $(HOST_OBJ) $(SDL_OBJ) $(IMGUI_OBJ) build/opl3.o build/sdl/flags
-	$(CXX) $(CXXFLAGS) -o $@ $(GAME_OBJ) $(HOST_OBJ) $(SDL_OBJ) $(IMGUI_OBJ) build/opl3.o \
-		$(shell sdl2-config --libs) $(GL_LIBS) -lm
+terep2vb: $(GAME_OBJ) $(HOST_OBJ) $(SDL_OBJ) build/opl3.o build/sdl/flags
+	$(CXX) $(CXXFLAGS) -o $@ $(GAME_OBJ) $(HOST_OBJ) $(SDL_OBJ) build/opl3.o $(shell sdl2-config --libs) -lm
 
 test: terep2-headless
 	sh tests/run_tests.sh
@@ -170,9 +158,9 @@ wasm-test: build/wasm/terep2-headless
 
 clean:
 	rm -f terep2vb terep2-headless
-	rm -rf build/game build/host build/test build/sdl build/imgui build/opl3.o build/opl3.d build/cov build/wasm
+	rm -rf build/game build/host build/test build/sdl build/opl3.o build/opl3.d build/cov build/wasm
 	rm -f web/terep2.wasm
 
--include $(wildcard build/*/*.d build/*.d build/imgui/backends/*.d build/cov/*/*.d build/wasm/*/*.d)
+-include $(wildcard build/*/*.d build/*.d build/cov/*/*.d build/wasm/*/*.d)
 
 .PHONY: all sdl test coverage web wasm-test clean FORCE
