@@ -195,7 +195,7 @@ uniform vec3 uShadowOffset;               // normal offset de cada cascata (mund
 uniform vec3  uLight;                     // direção para a luz (normalizada)
 uniform float uAmbient;
 flat out float vLight;
-flat out vec4 vColor;
+out vec4 vColor;                          // interpolada: os polígonos shaded (os outros: a mesma nos cantos)
 flat out vec3 vNormal;                    // normal de fora (o brilho dos texels de vidro)
 out vec2 vUV;
 out vec3 vShadow0;
@@ -257,7 +257,8 @@ precision highp int;
 precision highp sampler2D;
 precision highp sampler2DArrayShadow;
 flat in float vLight;
-flat in vec4 vColor;                      // cor sólida; alfa: 0 texturizado, 0,5 buraco, 1 cor sólida
+in vec4 vColor;                           // cor sólida (shaded: interpolada em RGB); alfa: 0 texturizado,
+                                          // 0,5 buraco, 1 cor sólida
 flat in vec3 vNormal;
 in vec2 vUV;
 in vec3 vShadow0;

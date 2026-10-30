@@ -8,7 +8,8 @@
 // O polígono de cor sólida (rzAddObjectPolygon) leva a cor no vértice, a da
 // paleta do PCX da textura em uso (solidColor), e passa pela mesma luz e
 // sombra que o texel de um texturizado; trocar a textura troca a paleta, e
-// os cantos são reenviados.
+// os cantos são reenviados. O shaded (rzAddObjectShadedPolygon) é igual, com
+// uma cor por canto, interpolada em RGB pelo shader.
 // Os cantos dos triângulos (VBO) são estáticos: vértice do objeto, polígono,
 // UV e cor. As posições e os índices dos polígonos ficam num uniform block do
 // objeto (ObjectData, kObjectDataSize); o vertex shader busca a posição do canto e
@@ -157,7 +158,8 @@ void uploadObject(const RzContext* ctx, Object& o) {
         const int32_t corners[3] = { tri.a, tri.b, tri.c };
         for (int32_t corner : corners) {
             const int32_t vertex = o.indices[corner];
-            *v++ = { 0.0f, 0.0f, 0.0f, 0, o.uvs[corner * 2], o.uvs[corner * 2 + 1], vertex, first, count, color };
+            const uint32_t c = pal == kPolygonShaded ? solidColor(ctx, o, o.cornerShade[corner]) : color;
+            *v++ = { 0.0f, 0.0f, 0.0f, 0, o.uvs[corner * 2], o.uvs[corner * 2 + 1], vertex, first, count, c };
         }
     }
     emitLines(ctx, o, v);
@@ -210,13 +212,14 @@ void bindObjectBuffers(const Object& o) {
     glBindBufferBase(GL_UNIFORM_BUFFER, kObjectDataBinding, o.dataBuffer);
 }
 
-// Corpo comum de rzAddObjectPolygon (indices, cor = paletteIndex) e
+// Corpo comum de rzAddObjectPolygon (indices, cor = paletteIndex),
+// rzAddObjectShadedPolygon (indices e shades, a cor de cada canto) e
 // rzAddObjectTexturedPolygon (corners com índice + UV, paletteIndex = -1).
 // Exatamente um de indices/corners não é nulo.
 int32_t addPolygon(RzContext* ctx, int32_t id, const uint16_t* indices, const RzTexVertex* corners,
-                   int32_t count, int32_t paletteIndex) {
+                   const uint8_t* shades, int32_t count, int32_t paletteIndex) {
     if (!validId(ctx, id) || (!indices && !corners) || count < 0) return RZ_ERR_INVALID_ARG;
-    if (!corners && (paletteIndex < 0 || paletteIndex > 255)) return RZ_ERR_INVALID_ARG;
+    if (!corners && !shades && (paletteIndex < 0 || paletteIndex > 255)) return RZ_ERR_INVALID_ARG;
     Object& o = ctx->objects[id];
     auto indexAt = [&](int32_t i) { return corners ? corners[i].index : indices[i]; };
 
@@ -237,9 +240,10 @@ int32_t addPolygon(RzContext* ctx, int32_t id, const uint16_t* indices, const Rz
     const int32_t  first   = int32_t(o.indices.size());
     o.polygonStart.push_back(first);
     o.polygonLength.push_back(n);
-    o.polygonPalette.push_back(int16_t(corners ? -1 : paletteIndex));
+    o.polygonPalette.push_back(corners ? int16_t(-1) : shades ? kPolygonShaded : int16_t(paletteIndex));
     for (int32_t i = 0; i < n; ++i) {
         o.indices.push_back(indexAt(i));
+        o.cornerShade.push_back(shades ? shades[i] : 0);
         o.uvs.push_back(corners ? corners[i].u : 0.0f);
         o.uvs.push_back(corners ? corners[i].v : 0.0f);
     }
@@ -467,13 +471,19 @@ int32_t rzCreateObject(RzContext* ctx, int32_t vertexCount, int32_t* outId) {
 int32_t rzAddObjectPolygon(RzContext* ctx, int32_t id,
                            const uint16_t* indices, int32_t count,
                            int32_t paletteIndex) {
-    return recordError(ctx, "rzAddObjectPolygon", addPolygon(ctx, id, indices, nullptr, count, paletteIndex));
+    return recordError(ctx, "rzAddObjectPolygon", addPolygon(ctx, id, indices, nullptr, nullptr, count, paletteIndex));
+}
+
+int32_t rzAddObjectShadedPolygon(RzContext* ctx, int32_t id,
+                                 const uint16_t* indices, const uint8_t* paletteIndices, int32_t count) {
+    if (!indices || !paletteIndices) return recordError(ctx, "rzAddObjectShadedPolygon", RZ_ERR_INVALID_ARG);
+    return recordError(ctx, "rzAddObjectShadedPolygon", addPolygon(ctx, id, indices, nullptr, paletteIndices, count, -1));
 }
 
 int32_t rzAddObjectTexturedPolygon(RzContext* ctx, int32_t id,
                                    const RzTexVertex* corners, int32_t count) {
     if (!corners) return recordError(ctx, "rzAddObjectTexturedPolygon", RZ_ERR_INVALID_ARG);
-    return recordError(ctx, "rzAddObjectTexturedPolygon", addPolygon(ctx, id, nullptr, corners, count, -1));
+    return recordError(ctx, "rzAddObjectTexturedPolygon", addPolygon(ctx, id, nullptr, corners, nullptr, count, -1));
 }
 
 int32_t rzAddObjectLine(RzContext* ctx, int32_t id, uint16_t a, uint16_t b,

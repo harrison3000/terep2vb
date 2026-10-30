@@ -472,6 +472,31 @@ static void loadCar(int i){
             rzAddObjectTexturedPolygon(ctx, idCar, vtx, n);
             continue;
         }
+        if(o.op == 6 || o.op == 7){ //OP_SHADED, OP_SHADED_TAB: a palette index per corner
+            // the shade is 8.8, the colour its high byte (raster.cpp,
+            // draw_shaded); the original interpolated the index, which
+            // walks through unrelated colours: here the colours are
+            // interpolated, in RGB.  OP_SHADED_TAB: shade = word of a table
+            // in car_proj + base (car_draw.cpp, shade_tab), never written
+            // by the known cars: 0, so the base
+            auto pts = o.outline;
+            int n = pts.size();
+            uint16_t idxs[n];
+            uint8_t shades[n];
+            int flag = 0;
+            for(int i = 0; i < n; i++){
+                int v = pts[i].point;
+                flag |= v & 1;
+                idxs[i] = v >> 1;
+                shades[i] = (uint16_t)(o.op == 6 ? pts[i].attr.a : o.word) >> 8;
+            }
+            if(flag){
+                //shadow polygon, as in the flat ones
+                continue;
+            }
+            rzAddObjectShadedPolygon(ctx, idCar, idxs, shades, n);
+            continue;
+        }
         if(o.op == 10){
             //will be actually handled below
             wi++;

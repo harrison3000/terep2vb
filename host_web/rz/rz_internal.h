@@ -289,6 +289,8 @@ static_assert(sizeof(ObjectVertex) == 40);
 // (amostra a textura no UV), de cor sólida (a cor do vértice: rzAddObjectPolygon
 // e linhas) ou buraco (a cor sólida 255, transparente: não desenha, mas faz sombra)
 constexpr uint32_t kCornerTextured = 0, kCornerHole = 128, kCornerSolid = 255;
+// Object::polygonPalette de um polígono shaded (rzAddObjectShadedPolygon)
+constexpr int16_t  kPolygonShaded = -2;
 
 // Vértice do terreno: um por canto de triângulo (malha não indexada, porque a
 // cor flat e o bloco são do triângulo/quad, não do ponto da grade).
@@ -342,7 +344,9 @@ struct Object {
     std::vector<int32_t>  polygonLength;  // sem o índice de fechamento
     std::vector<uint16_t> indices;        // cópia dos índices dos polígonos (sem os fechamentos)
     std::vector<float>    uvs;            // (u, v) de cada entrada de `indices`; 0 nos de cor sólida
-    std::vector<int16_t>  polygonPalette; // índice de cor (rzAddObjectPolygon) ou -1 (UVs próprios)
+    std::vector<int16_t>  polygonPalette; // índice de cor (rzAddObjectPolygon), -1 (UVs próprios) ou
+                                          // kPolygonShaded (a cor de cada canto em cornerShade)
+    std::vector<uint8_t>  cornerShade;    // índice de cor de cada entrada de `indices` (shaded; 0 nos outros)
     std::vector<ObjectTriangle> triangles; // leque de cada polígono, montado na carga
     std::vector<ObjectLine> lines;        // rzAddObjectLine: prisma fino gerado no envio
     std::vector<ObjectVertex> staging;    // triangles.size() * 3 + lines.size() * kLineVertices

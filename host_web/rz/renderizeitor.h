@@ -194,6 +194,13 @@ int32_t rzAddObjectPolygon(RzContext* ctx, int32_t id,
                            const uint16_t* indices, int32_t count,
                            int32_t paletteIndex);
 
+/* Igual a rzAddObjectPolygon, mas com uma cor por canto (Gouraud):
+   paletteIndices tem count índices da mesma paleta, um para cada índice de
+   vértice (o do fechamento também, descartado junto). A cor é interpolada em
+   RGB entre os cantos, com a mesma luz flat. Erros: os de rzAddObjectPolygon. */
+int32_t rzAddObjectShadedPolygon(RzContext* ctx, int32_t id,
+                                 const uint16_t* indices, const uint8_t* paletteIndices, int32_t count);
+
 /* Igual a rzAddObjectPolygon, mas com UVs próprios em vez da cor: corners
    tem count cantos (índice do vértice + UV). Se o último canto repetir o
    índice do primeiro (fechamento), ele é descartado. u e v vão de 0 a 1,
