@@ -386,6 +386,7 @@ void drawWheelFaces(RzContext* ctx, const Mat4& viewProj) {
             bound = true;
         }
         glBindTexture(GL_TEXTURE_2D, o.texture ? o.texture : ctx->fallbackTex);
+        glUniform1i(prog.texelMode, objectTextureGlass(ctx, o) ? kTexelsOpaqueGlass : kTexelsOpaque);
         glBindVertexArray(o.wheelCapVao);
         for (int32_t i = 0; i < 4; ++i) {
             setMatrix(prog.model, o.wheelModel[i]);

@@ -196,6 +196,7 @@ uniform vec3  uLight;                     // direção para a luz (normalizada)
 uniform float uAmbient;
 flat out float vLight;
 flat out vec4 vColor;
+flat out vec3 vNormal;                    // normal de fora (o brilho dos texels de vidro)
 out vec2 vUV;
 out vec3 vShadow0;
 #if CASCADES == 3
@@ -233,6 +234,7 @@ void main() {
     vec3 n = normalize(mat3(uModel) * normal);
     vNdotL = dot(n, uLight);
     vLight = uAmbient + (1.0 - uAmbient) * max(vNdotL, 0.0);
+    vNormal = n;
     vUV = aUV;
     vColor = aColor;
     vec4 world = uModel * vec4(position, 1.0);
@@ -256,6 +258,7 @@ precision highp sampler2D;
 precision highp sampler2DArrayShadow;
 flat in float vLight;
 flat in vec4 vColor;                      // cor sólida; alfa: 0 texturizado, 0,5 buraco, 1 cor sólida
+flat in vec3 vNormal;
 in vec2 vUV;
 in vec3 vShadow0;
 #if CASCADES == 3
@@ -278,6 +281,9 @@ uniform vec3  uEye;
 uniform vec3  uFogOrigin;   // olho (seguindo) ou centro do mapa (visão geral)
 
 uniform sampler2D       uTexture;
+uniform int   uTexelMode;                 // 0 opacos (corte 0,5), 1 opacos sem o vidro, 2 só o vidro
+uniform vec3  uLight;                     // vidro: direção para a luz e o brilho (como glass.frag)
+uniform float uSpecular, uShininess;
 uniform sampler2DArrayShadow uShadow;     // as três cascatas, uma por camada
 uniform vec3  uCascade;                   // fim da cascata 0, fim da 1, faixa de transição (mundo)
 uniform int   uCascadeOnlyFar;            // visão geral: só a cascata 2
@@ -333,6 +339,20 @@ void main() {
     // Derivadas antes de qualquer desvio: a neblina sai cedo em parte dos pixels
     vec2 dUVx = dFdx(vUV), dUVy = dFdy(vUV);
     float fog = fogFactor();
+    if (uTexelMode == 2) {
+        // Texels de vidro (rz_texture.cpp: alfa 0,5, rgb = cinza): o filtro e
+        // o brilho, como glass.frag, com o blending do vidro (rz_glass.cpp)
+        if (vColor.a >= 0.25 || fog >= 1.0) discard;
+        vec4 tex = textureGrad(uTexture, vUV, dUVx, dUVy);
+        if (tex.a < 0.25 || tex.a >= 0.75) discard;
+        float spec = 0.0;
+        if (vNdotL > 0.0) {
+            vec3 h = normalize(uLight + normalize(uEye - vWorld));
+            spec = pow(max(dot(vNormal, h), 0.0), uShininess) * uSpecular * shadowTerm();
+        }
+        fragColor = vec4(vec3(spec * (1.0 - fog)), mix(tex.r, 1.0, fog));
+        return;
+    }
     if (fog >= 1.0) {
         fragColor = vec4(uFogColor, 0.0);
         return;
@@ -340,7 +360,7 @@ void main() {
     vec3 texel;
     if (vColor.a < 0.25) {                                   // texturizado
         vec4 tex = textureGrad(uTexture, vUV, dUVx, dUVy);   // nearest no nível, linear entre níveis
-        if (tex.a < 0.5) discard;                            // índice 255 do PCX: transparente
+        if (tex.a < (uTexelMode == 1 ? 0.75 : 0.5)) discard; // índice 255 do PCX (e o vidro)
         texel = tex.rgb;
     } else if (vColor.a < 0.75) {
         discard;                                             // a cor sólida 255: transparente

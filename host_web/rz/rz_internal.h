@@ -131,9 +131,19 @@ static_assert(kFogEndDefault <= kFogMaxEnd && kFogMaxEnd <= float(kSkirtExtent),
 
 // Transparência das texturas PCX (atlas e objetos): o índice 255 da paleta
 // vira alfa 0 (o resto, alfa 255); o shader descarta o pixel com alfa < 0,5.
-// Mipmaps com média ponderada pelo alfa (a cor do 255 não vaza nas bordas).
+// Mipmaps com média ponderada pelo alfa (a cor do 255 não vaza nas bordas); os
+// dos objetos, por classe de texel (rz_texture.cpp).
 // A sombra ignora (os buracos ainda projetam sombra).
 constexpr int32_t  kTransparentIndex = 255;
+// Texels de vidro nas texturas dos objetos: os índices 240..254 (como no
+// legado: o que está atrás passa pela tabela de translucidez do tom índice −
+// 240) viram um filtro de cinza como o do vidro (rz_glass.cpp), desenhado num
+// passe próprio (drawTexturedGlass). No texel: rgb = o cinza, alfa = kGlassAlpha;
+// opaco 255, transparente 0. O tom 0 (preto) vira kGlassTexelTone0, como faz o
+// gl_renderer com os polígonos de vidro.
+constexpr int32_t  kFirstGlassIndex  = 240;
+constexpr uint32_t kGlassAlpha       = 128;
+constexpr int32_t  kGlassTexelTone0  = 6;   // escolha de gosto (preto escurecia demais); trocar se ficar ruim
 
 // Sprites (rz_sprites.cpp): fumaça/detritos/água, quads virados para a câmera
 constexpr int32_t kMaxSprites          = 256;    // máximo validado no legado
@@ -380,6 +390,7 @@ struct Object {
     int32_t   wheelCapVerts = 0;        // vértices em uso no VBO das faces
 
     GLuint    texture = 0;          // 0: usa a textura fallback do contexto
+    bool      textureGlass = false; // a textura tem texels de vidro
     uint8_t   palette[768];         // RGB da paleta do PCX da textura (as cores sólidas)
 
     int32_t vertexCount() const   { return int32_t(world.size()); }
@@ -411,6 +422,7 @@ struct ObjectProgram {
     GLint  viewProj = -1, texture = -1, ambient = -1;
     GLint  model = -1;     // uModel: identidade, exceto nas rodas
     GLint  fromBuffer = -1; // 1: objetos (posições/normais do bloco); 0: faces das rodas
+    GLint  texelMode = -1;  // kTexels*: o que o shader desenha da textura
     ShadowUniforms shadow;
     FogUniforms    fog;
 };
@@ -567,6 +579,7 @@ struct RzContext {
     rz::GLuint fallbackTex = 0;
     bool       hasFallbackPalette = false;   // false: o xadrez gerado (cores sólidas: a paleta do atlas)
     uint8_t    fallbackPalette[768];         // RGB da paleta do PCX da fallback
+    bool       fallbackGlass = false;        // a fallback tem texels de vidro
 
     // Câmera
     float terrainRadius = 0.0f;   // R: raio da esfera envolvente do terreno
@@ -762,6 +775,10 @@ inline uint32_t rgbaTexel(uint32_t rgb, uint32_t alpha) {
     return ((rgb >> 16) & 0xFF) | (rgb & 0xFF00) | ((rgb & 0xFF) << 16) | (alpha << 24);
 }
 
+// uTexelMode do shader dos objetos: só os opacos (textura sem vidro: corte
+// em alfa 0,5, como sempre; com vidro: 0,75, o vidro fica de fora) ou só o vidro
+constexpr int32_t kTexelsOpaque = 0, kTexelsOpaqueGlass = 1, kTexelsGlass = 2;
+
 // rz_texture.cpp: texturas 2D quadradas dos objetos (mipmaps na CPU)
 GLuint uploadSquareTexture(const uint32_t* rgba, int32_t side);
 void   applyFilter2D(GLuint texture, int32_t side);
@@ -775,6 +792,8 @@ void prepareObjects(RzContext* ctx);          // reenvia os VBOs alterados
 // passe da sombra (programa já ligado): onlyId >= 0 desenha só ele; skipId >= 0 pula ele
 void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId, int32_t skipId);
 void drawObjects(RzContext* ctx, const Mat4& viewProj);
+void drawTexturedGlass(RzContext* ctx, const Mat4& viewProj);   // texels de vidro, depois do opaco
+bool objectTextureGlass(const RzContext* ctx, const Object& o);  // a textura que ele usa tem vidro
 void destroyAllObjects(RzContext* ctx);
 void markObjectsDirty(RzContext* ctx);        // a paleta das cores sólidas mudou: cantos a reenviar
 

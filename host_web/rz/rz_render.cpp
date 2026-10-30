@@ -159,12 +159,15 @@ bool createRenderer(RzContext* ctx) {
     o.ambient   = glGetUniformLocation(o.program, "uShadowLight");
     o.model    = glGetUniformLocation(o.program, "uModel");
     o.fromBuffer = glGetUniformLocation(o.program, "uFromBuffer");
+    o.texelMode = glGetUniformLocation(o.program, "uTexelMode");
     glUseProgram(o.program);
     setMatrix(o.model, Mat4::identity());
     glUniform1i(o.fromBuffer, 0);
     glUniformBlockBinding(o.program, glGetUniformBlockIndex(o.program, "ObjectData"), kObjectDataBinding);
     glUniform1i(o.texture, kUnitAtlas);
     glUniform1f(o.ambient, kShadowLight);
+    glUniform1f(glGetUniformLocation(o.program, "uSpecular"), kGlassSpecular);    // texels de vidro
+    glUniform1f(glGetUniformLocation(o.program, "uShininess"), kGlassShininess);
     initShadowUniforms(o.program, o.shadow);
     initFogUniforms(o.program, o.fog);
     initLightUniforms(o.program);
@@ -258,6 +261,7 @@ void renderFrame(RzContext* ctx) {
     drawWheels(ctx, viewProj);                    // pneus das rodas: programa do terreno, sem textura
     drawWheelFaces(ctx, viewProj);                // faces das rodas: programa dos objetos, texturizadas
     drawGlass(ctx, viewProj);                     // vidro: filtro + brilho, depois do opaco
+    drawTexturedGlass(ctx, viewProj);             // texels de vidro: o mesmo filtro
     drawSprites(ctx, viewProj);                   // fumaça etc.: alfa, de trás para frente
     drawWall(ctx, viewProj);                      // semitransparente: por último
 }

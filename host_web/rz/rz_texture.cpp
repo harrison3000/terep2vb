@@ -11,8 +11,12 @@
 // A paleta do PCX fica com a textura: as cores sólidas (rzAddObjectPolygon)
 // saem dela (rz_object.cpp). O xadrez fallback gerado aqui não tem paleta.
 //
-// Mipmaps gerados na CPU (média 2x2), como no atlas do chão; filtro fixo, o
-// mesmo do chão (nearest no nível, linear entre níveis).
+// Texels de vidro (índices 240..254, kFirstGlassIndex): ver rz_internal.h.
+//
+// Mipmaps gerados na CPU: cada texel de um nível é da classe (opaco, vidro ou
+// transparente) da maioria dos 4 de baixo, com a média das cores só deles (o
+// alfa não mistura as classes); filtro fixo, o mesmo do chão (nearest no
+// nível, linear entre níveis).
 
 #include <cstring>
 
@@ -42,6 +46,39 @@ bool validId(const RzContext* ctx, int32_t id) {
 void releaseTexture(Object& o) {
     if (o.texture) glDeleteTextures(1, &o.texture);
     o.texture = 0;
+}
+
+// A classe do texel pelo alfa: 0 transparente, 1 vidro, 2 opaco
+int32_t texelClass(uint32_t t) {
+    const uint32_t a = t >> 24;
+    return a == 0 ? 0 : (a == kGlassAlpha ? 1 : 2);
+}
+
+// Nível L+1 a partir do L (rgbaTexel): a classe da maioria dos 4 texels (no
+// empate, a mais opaca), com a média arredondada das cores deles
+void downsampleClasses(const uint32_t* src, uint32_t* dst, int32_t dstSide) {
+    const int32_t srcSide = dstSide * 2;
+    constexpr uint32_t kAlpha[3] = { 0, kGlassAlpha, 255 };
+    for (int32_t y = 0; y < dstSide; ++y) {
+        for (int32_t x = 0; x < dstSide; ++x) {
+            const uint32_t p[4] = { src[(2 * y) * srcSide + 2 * x],     src[(2 * y) * srcSide + 2 * x + 1],
+                                    src[(2 * y + 1) * srcSide + 2 * x], src[(2 * y + 1) * srcSide + 2 * x + 1] };
+            int32_t count[3] = { 0, 0, 0 };
+            for (const uint32_t q : p) ++count[texelClass(q)];
+            int32_t cls = 2;
+            for (int32_t c = 1; c >= 0; --c)
+                if (count[c] > count[cls]) cls = c;
+            uint32_t sum[3] = { 0, 0, 0 };
+            for (const uint32_t q : p) {
+                if (texelClass(q) != cls) continue;
+                for (int32_t c = 0; c < 3; ++c) sum[c] += (q >> (8 * c)) & 0xFF;
+            }
+            const uint32_t n = uint32_t(count[cls]);
+            uint32_t out = kAlpha[cls] << 24;
+            for (int32_t c = 0; c < 3; ++c) out |= ((sum[c] + n / 2) / n) << (8 * c);
+            dst[y * dstSide + x] = out;
+        }
+    }
 }
 
 } // namespace
@@ -80,7 +117,7 @@ GLuint uploadSquareTexture(const uint32_t* rgba, int32_t side) {
         const int32_t s = side >> l;
         if (l > 0) {
             const int32_t prev = s * 2;
-            downsample(chain.data() + offset - size_t(prev) * size_t(prev), chain.data() + offset, s);
+            downsampleClasses(chain.data() + offset - size_t(prev) * size_t(prev), chain.data() + offset, s);
         }
         fillTransparent(chain.data() + offset, s);       // cor dos buracos = vizinhos opacos
         glTexImage2D(GL_TEXTURE_2D, l, GL_RGBA8, s, s, 0, GL_RGBA, GL_UNSIGNED_BYTE,
@@ -97,11 +134,13 @@ GLuint uploadSquareTexture(const uint32_t* rgba, int32_t side) {
     return texture;
 }
 
-// PCX -> textura quadrada (regras do topo do arquivo) e a paleta dele
-// (768 bytes RGB). Em caso de erro, nada é criado e *outTexture fica 0.
+// PCX -> textura quadrada (regras do topo do arquivo), a paleta dele (768
+// bytes RGB) e se há texels de vidro. Em caso de erro, nada é criado e
+// *outTexture fica 0.
 static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint* outTexture,
-                                        uint8_t* outPalette) {
+                                        uint8_t* outPalette, bool* outGlass) {
     *outTexture = 0;
+    *outGlass = false;
     PcxImage img;
     const int32_t err = decodePcx(pcx, size, img);
     if (err != RZ_OK) return err;
@@ -120,12 +159,20 @@ static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint
                            | uint32_t(img.palette[i * 3 + 2]);
         pal[i] = rgbaTexel(rgb, i == kTransparentIndex ? 0 : 255);   // 255: transparente
     }
+    for (int32_t i = kFirstGlassIndex; i < kTransparentIndex; ++i) {   // vidro: o cinza do tom
+        const int32_t tone = i == kFirstGlassIndex ? kGlassTexelTone0 : i - kFirstGlassIndex;
+        const uint32_t g = uint32_t(tone * 255 + 7) / 15;
+        pal[i] = rgbaTexel((g << 16) | (g << 8) | g, kGlassAlpha);
+    }
     std::vector<uint32_t> texels(size_t(side) * size_t(side));
     for (int32_t y = 0; y < side; ++y) {
         const int32_t srcY = y < img.height ? y : img.height - 1;
         const uint8_t* src = img.pixels.data() + size_t(srcY) * size_t(img.width);
         uint32_t* dst = texels.data() + size_t(y) * size_t(side);
-        for (int32_t x = 0; x < side; ++x) dst[x] = pal[src[x]];
+        for (int32_t x = 0; x < side; ++x) {
+            dst[x] = pal[src[x]];
+            if (src[x] >= kFirstGlassIndex && src[x] < kTransparentIndex) *outGlass = true;
+        }
     }
 
     *outTexture = uploadSquareTexture(texels.data(), side);
@@ -149,6 +196,7 @@ bool createFallbackTexture(RzContext* ctx) {
     if (ctx->fallbackTex) glDeleteTextures(1, &ctx->fallbackTex);
     ctx->fallbackTex = texture;
     ctx->hasFallbackPalette = false;
+    ctx->fallbackGlass = false;
     markObjectsDirty(ctx);
     return true;
 }
@@ -164,7 +212,8 @@ int32_t rzLoadObjectTexture(RzContext* ctx, int32_t id, const uint8_t* pcx, int3
     Object& o = ctx->objects[id];
     releaseTexture(o);                       // em caso de erro: fallback
     o.gpuDirty = true;                       // as cores sólidas: a paleta nova (ou a da fallback)
-    return recordError(ctx, "rzLoadObjectTexture", loadSquareTextureFromPcx(pcx, size, &o.texture, o.palette));
+    return recordError(ctx, "rzLoadObjectTexture",
+                       loadSquareTextureFromPcx(pcx, size, &o.texture, o.palette, &o.textureGlass));
 }
 
 int32_t rzLoadFallbackTexture(RzContext* ctx, const uint8_t* pcx, int32_t size) {
@@ -173,12 +222,14 @@ int32_t rzLoadFallbackTexture(RzContext* ctx, const uint8_t* pcx, int32_t size) 
 
     GLuint texture;
     uint8_t palette[768];
-    const int32_t err = loadSquareTextureFromPcx(pcx, size, &texture, palette);
+    bool glass;
+    const int32_t err = loadSquareTextureFromPcx(pcx, size, &texture, palette, &glass);
     if (err != RZ_OK) return recordError(ctx, "rzLoadFallbackTexture", err);   // a fallback atual continua
     glDeleteTextures(1, &ctx->fallbackTex);
     ctx->fallbackTex = texture;
     std::memcpy(ctx->fallbackPalette, palette, sizeof(palette));
     ctx->hasFallbackPalette = true;
+    ctx->fallbackGlass = glass;
     markObjectsDirty(ctx);                   // as cores sólidas de quem usa a fallback
     return RZ_OK;
 }

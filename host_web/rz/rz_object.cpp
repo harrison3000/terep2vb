@@ -359,10 +359,54 @@ void drawObjects(RzContext* ctx, const Mat4& viewProj) {
         // Textura própria ou fallback
         const GLuint  texture = o.texture ? o.texture : ctx->fallbackTex;
         glBindTexture(GL_TEXTURE_2D, texture);
+        glUniform1i(prog.texelMode, objectTextureGlass(ctx, o) ? kTexelsOpaqueGlass : kTexelsOpaque);
         glBindVertexArray(o.vao);
         glDrawArrays(GL_TRIANGLES, 0, o.drawVertexCount());
     }
     if (programBound) glUniform1i(ctx->objectProgram.fromBuffer, 0);   // faces das rodas: posição direta
+}
+
+bool objectTextureGlass(const RzContext* ctx, const Object& o) {
+    return o.texture ? o.textureGlass : ctx->fallbackGlass;
+}
+
+// Os texels de vidro das texturas (rz_internal.h, kFirstGlassIndex): de novo
+// os objetos cuja textura os tem, no programa dos objetos em kTexelsGlass, com
+// o estado do vidro (rz_glass.cpp: brilho + destino x cinza, sem gravar
+// profundidade nem alfa). Não projetam sombra (a sombra do objeto inteiro já cobre).
+void drawTexturedGlass(RzContext* ctx, const Mat4& viewProj) {
+    const Frustum f = frustumOf(viewProj);
+    const ObjectProgram& prog = ctx->objectProgram;
+    bool programBound = false;
+    for (Object& o : ctx->objects) {
+        if (!drawable(o) || !objectTextureGlass(ctx, o) || !objectInView(ctx, o, f)) continue;
+        if (!programBound) {
+            glEnable(GL_CULL_FACE);
+            glCullFace(GL_FRONT);
+            glUseProgram(prog.program);
+            setMatrix(prog.viewProj, viewProj);
+            bindShadowMaps(ctx, prog.shadow);           // deixa a unidade 0 ativa
+            bindFog(ctx, prog.fog);
+            glUniform1i(prog.fromBuffer, 1);
+            glUniform1i(prog.texelMode, kTexelsGlass);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_ONE, GL_SRC_ALPHA);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+            glDepthMask(GL_FALSE);
+            programBound = true;
+        }
+        bindObjectBuffers(o);
+        glBindTexture(GL_TEXTURE_2D, o.texture ? o.texture : ctx->fallbackTex);
+        glBindVertexArray(o.vao);
+        glDrawArrays(GL_TRIANGLES, 0, o.drawVertexCount());
+    }
+    if (programBound) {
+        glUniform1i(prog.fromBuffer, 0);
+        glUniform1i(prog.texelMode, kTexelsOpaque);
+        glDepthMask(GL_TRUE);
+        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        glDisable(GL_BLEND);
+    }
 }
 
 void markObjectsDirty(RzContext* ctx) {
