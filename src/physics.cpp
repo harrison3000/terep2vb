@@ -8,7 +8,6 @@
  * contacts and move the particles.
  *
  */
-#include <math.h>
 #include "terep.hpp"
 
 /* Keys of each car: accelerate, brake, left, right, handbrake, unused. */
@@ -213,13 +212,37 @@ void Car::update_mid()
  * Springs
  * ---------------------------------------------------------------------- */
 
-/* CVTSS2SI: round to nearest, value is clamped, if its a NaN, God help us. */
-static int32_t float_to_i32(double f)
+/* floor(sqrt(v)), digit by digit. */
+static uint32_t isqrt32(uint32_t v)
 {
-    f = fmin(f, 2147483647.0);
-    f = fmax(f, -2147483648.0);
+    uint32_t r = 0, bit = 1u << 30;
+    while (bit > v)
+        bit >>= 2;
+    for (; bit; bit >>= 2) {
+        if (v >= r + bit) {
+            v -= r + bit;
+            r = (r >> 1) + bit;
+        } else {
+            r >>= 1;
+        }
+    }
+    return r;
+}
 
-    return (int32_t)lrint(f);
+static uint32_t isqrt64(uint64_t v)
+{
+    uint64_t r = 0, bit = 1ull << 62;
+    while (bit > v)
+        bit >>= 2;
+    for (; bit; bit >>= 2) {
+        if (v >= r + bit) {
+            v -= r + bit;
+            r = (r >> 1) + bit;
+        } else {
+            r >>= 1;
+        }
+    }
+    return (uint32_t)r;
 }
 
 /* Split the impulse between both ends; the spring's shift makes it act
@@ -243,11 +266,11 @@ static void update_spring(CarVertex &a, CarVertex &b, CarSpring &s)
     /* length one step ahead: positions plus relative velocity */
     Vec3 ahead = d;
     ahead += a.vel - b.vel;
-    double fx = (double)ahead.x, fy = (double)ahead.y, fz = (double)ahead.z;
-    fx *= fx;
-    fy *= fy;
-    fz *= fz;
-    int32_t len = float_to_i32(sqrt((fy + fx) + fz)) >> 10;
+    /* each square is at most 2^62, so the sum of three fits unsigned */
+    uint64_t sq = (uint64_t)((int64_t)ahead.x * ahead.x) + (uint64_t)((int64_t)ahead.y * ahead.y)
+                + (uint64_t)((int64_t)ahead.z * ahead.z);
+    sq >>= 20;                          /* sqrt(x) >> 10 == sqrt(x >> 20), give or take */
+    int32_t len = (int32_t)(sq < 0x80000000u ? isqrt32((uint32_t)sq) : isqrt64(sq));
 
     int32_t rest = s.rest, force;
     if (rest < 0) {                     /* first tick: take the current length */
