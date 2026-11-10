@@ -258,7 +258,7 @@ void renderFrame(RzContext* ctx) {
         glEnable(GL_CULL_FACE);                   // terreno: só a face de cima
         glCullFace(GL_BACK);
         drawTerrain(ctx, viewProj, ctx->fogOn);   // só os blocos na tela e antes do fim da neblina
-        if (ctx->fogOn) drawSkirt(ctx, viewProj, true);   // continuação além do mapa: só com neblina
+        if (ctx->fogOn && ctx->skirtOn) drawSkirt(ctx, viewProj, true);   // continuação além do mapa: só com neblina
     }
 
     {                                             // discos projetados (rzSetObjectDecals)

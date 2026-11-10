@@ -53,6 +53,11 @@ function wasiImports(getMemory) {
         fd_prestat_get: () => 8,    // EBADF: no directories (wasi-libc asks once fopen is linked in)
         fd_prestat_dir_name: () => 8,
         proc_exit(code) { throw new Error('terep2.wasm exited with ' + code); },
+        // newer wasi-libc: stdio's locks can wait on a clock (never long: one thread)
+        clock_time_get(id, precision, p) {
+            new DataView(getMemory().buffer).setBigUint64(p, BigInt(Math.round(performance.now() * 1e6)), true);
+            return 0;
+        },
         fd_fdstat_get(fd, p) {      // 1 and 2 are terminals (line by line), nothing else is open
             if (fd !== 1 && fd !== 2)
                 return 8;           // EBADF

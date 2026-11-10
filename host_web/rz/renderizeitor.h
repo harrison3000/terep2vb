@@ -166,9 +166,15 @@ int32_t rzSetBackgroundColor(RzContext* ctx, uint8_t paletteIndex);
    na GPU), vale a partir do próximo rzRender. Pode ser chamada a qualquer
    momento, inclusive todo frame ao longo do percurso (ex.: fechar a neblina
    num trecho).
-   Erros: RZ_ERR_INVALID_ARG se não for 0 <= start < end <= 120 (o terreno
-   continua 120 tiles além da borda do mapa; mais que isso faltaria chão). */
+   Erros: RZ_ERR_INVALID_ARG se não for 0 <= start < end <= 150. O terreno
+   continua só 128 tiles além da borda do mapa: com o fim acima de 120, o
+   fim dele pode aparecer (um editor, não o jogo). */
 int32_t rzSetFog(RzContext* ctx, float start, float end);
+
+/* O terreno de fora do mapa (a continuação além da borda): desenhado ou não
+   (on == 0: só o mapa, o resto na cor de fundo; um editor). Padrão: ligado.
+   Vale a partir do próximo rzRender. */
+int32_t rzSetSkirt(RzContext* ctx, int32_t on);
 
 /* ------------------------------------------------------------------------ */
 /* Objetos                                                                  */

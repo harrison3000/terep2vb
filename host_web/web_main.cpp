@@ -235,6 +235,13 @@ EXPORT("web_free_camera") void web_free_camera(bool on, float x, float y, float 
     }
 }
 
+// The checkpoint editor's view (see gl_editor_view), or the game's.
+EXPORT("web_editor_view") void web_editor_view(bool on)
+{
+    if (running && opengl)
+        gl_editor_view(on);
+}
+
 // Discs projected from above on the cars (the checkpoints, as they are on
 // the ground): count RzDecal (8 floats each) at p, up to RZ_MAX_DECALS.
 EXPORT("web_decals") void web_decals(const RzDecal *p, int count)

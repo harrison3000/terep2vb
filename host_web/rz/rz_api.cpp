@@ -222,6 +222,12 @@ int32_t rzSetFog(RzContext* ctx, float start, float end) {
     return RZ_OK;
 }
 
+int32_t rzSetSkirt(RzContext* ctx, int32_t on) {
+    if (!ctx) return RZ_ERR_INVALID_ARG;
+    ctx->skirtOn = on != 0;
+    return RZ_OK;
+}
+
 int32_t rzSetCameraTarget(RzContext* ctx, int32_t id, int32_t vertex) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
     if (id < 0) {

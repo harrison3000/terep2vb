@@ -111,7 +111,7 @@ float sliceSphere(const RzContext* ctx, float d0, float d1, Vec3* center) {
 void drawTerrainDepth(const RzContext* ctx, const Mat4& matrix) {
     if (!ctx->hasTerrain()) return;
     drawTerrain(ctx, matrix, false);
-    drawSkirt(ctx, matrix, false);
+    if (ctx->skirtOn) drawSkirt(ctx, matrix, false);
 }
 
 } // namespace

@@ -24,5 +24,6 @@ void gl_set_draw_distance(int tiles);   // where the fog starts: DRAW_DISTANCE_M
 // forward (tiles, the game's axes: x column, y row, z up), or off (back to
 // the camera of F1..F5)
 void gl_free_camera(bool on, const float eye[3], const float forward[3]);
+void gl_editor_view(bool on);           // the checkpoint editor's: fog far, no terrain past the map's edge; or back
 void gl_set_decals(const RzDecal *decals, int count);   // checkpoints projected on the cars (rzSetObjectDecals)
 const float *gl_view();                 // the last frame's camera (rzGetView), RZ_VIEW_FLOATS floats

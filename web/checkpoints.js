@@ -38,10 +38,13 @@ function formatTime(seconds) {
     return (m ? m + 'm' : '') + (s || !m ? s + 's' : '');
 }
 
-// A checkpoint's line (LINE's match) -> its point, or null.
+// Inside the map's wall (x and y from 0 to 255): where checkpoints can be
+const insideWall = (x, y) => x >= 0 && x <= 255 && y >= 0 && y <= 255;
+
+// A checkpoint's line (LINE's match) -> its point, or null (also out of the wall).
 function point(m) {
     const fork = m[2].includes('*'), fire = /f/i.test(m[2]), v = m[3].split(',').map(Number);
-    if (v.length !== (fire ? 5 : 3) || !(v[v.length - 1] > 0))
+    if (v.length !== (fire ? 5 : 3) || !(v[v.length - 1] > 0) || !insideWall(v[0], v[1]))
         return null;
     return fire ? { n: +m[1], fork, fire, x: v[0], y: v[1], z: v[2], angle: v[3], d: v[4] }
                 : { n: +m[1], fork, fire, x: v[0], y: v[1], d: v[2] };
@@ -539,6 +542,8 @@ const DEFAULT_DIAMETER = 3;
 const SPEED = 10;                   // tiles a second flying (x4 with Shift)
 const TURN = 0.0025;                // radians a pixel of the mouse
 const KEY_TURN = 1.6;               // radians a second with the arrows
+const MAP_END = 255;                // tiles: the wall, at 0 and here on both axes
+const EYE_OUT = 10, EYE_LOW = 5, EYE_OVER = 1, EYE_HIGH = 50;   // tiles: where the camera can go (see checkpointsBeforeFrame)
 
 let wasm = null, glCanvas = null, markers = null;
 let previewMarkers = null;          // the editor's preview, apart: it moves every frame
@@ -778,9 +783,11 @@ export function checkpointsBeforeFrame(ms) {
         ed.eye[1] += (s * along + c * side) * speed;
         ed.eye[2] += up * speed;
     }
-    ed.eye[0] = Math.max(-100, Math.min(355, ed.eye[0]));
-    ed.eye[1] = Math.max(-100, Math.min(355, ed.eye[1]));
-    ed.eye[2] = Math.max(groundHeight(heights, ed.eye[0], ed.eye[1]) + 0.3, Math.min(150, ed.eye[2]));
+    // up to EYE_OUT tiles out of the wall; between EYE_LOW (and EYE_OVER the
+    // ground) and EYE_HIGH up
+    ed.eye[0] = Math.max(-EYE_OUT, Math.min(MAP_END + EYE_OUT, ed.eye[0]));
+    ed.eye[1] = Math.max(-EYE_OUT, Math.min(MAP_END + EYE_OUT, ed.eye[1]));
+    ed.eye[2] = Math.min(EYE_HIGH, Math.max(EYE_LOW, groundHeight(heights, ed.eye[0], ed.eye[1]) + EYE_OVER, ed.eye[2]));
     const f = forward();
     wasm.web_free_camera(1, ...ed.eye, ...f);
     ed.aim = hitGround(heights, ed.eye, f);
@@ -874,7 +881,7 @@ export function checkpointsAfterFrame() {
         alpha: i === ed.aimed ? pulse : 1,
     }));
     markers.draw(view, styles);
-    if (ed.aim && ed.aimed < 0) {               // the preview, every frame: it moves with the aim
+    if (ed.aim && ed.aimed < 0 && insideWall(...ed.aim)) {   // the preview, every frame: it moves with the aim
         const shape = { kind: KIND_DISC, x: ed.aim[0], y: ed.aim[1], d: ed.diameter };
         const style = { color: COLORS.preview, alpha: 0.5 };
         previewMarkers.set([shape], heights);
@@ -990,7 +997,7 @@ const round2 = (v) => Math.round(v * 100) / 100;
 // of the last number, all of which become forks.  A ring of fire (fire)
 // stands there just over the ground, the way through it the camera's.
 function place(fork, fire = false) {
-    if (!ed.aim)
+    if (!ed.aim || !insideWall(...ed.aim))
         return;
     const n = fork ? Math.max(1, lastNumber()) : lastNumber() + 1;
     if (fork)
@@ -1157,6 +1164,7 @@ function openEditor() {
     ed.on = true;
     dirty = true;                               // the buffer: the editor's shapes
     wasm.web_pause(1);
+    wasm.web_editor_view(1);
     addEventListener('pointerdown', onPointerDown);
     addEventListener('mousemove', onMouseMove);
     addEventListener('wheel', onWheel, { passive: false });
@@ -1178,6 +1186,7 @@ function closeEditor() {
     if (wasm) {
         wasm.web_free_camera(0, 0, 0, 0, 1, 0, 0);
         wasm.web_pause(0);
+        wasm.web_editor_view(0);
         startRace();                            // again: the checkpoints may have changed
     }
 }

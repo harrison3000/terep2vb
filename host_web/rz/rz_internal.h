@@ -125,8 +125,9 @@ constexpr float   kBorderTopFade    = 2.5f;   // some aos poucos nos últimos ti
 constexpr float   kBorderFadeFar    = 25.0f;  // alvo a 25 tiles: começa a aparecer
 constexpr float   kBorderFadeNear   = 6.0f;   // a 6 tiles: totalmente visível
 constexpr float   kBorderXSize      = 2.125f; // célula de cada círculo (tiles), presa ao mundo
-constexpr float   kFogMaxEnd = 120.0f;   // rzSetFog (a continuação vai a kSkirtExtent, com folga)
-static_assert(kFogEndDefault <= kFogMaxEnd && kFogMaxEnd <= float(kSkirtExtent),
+constexpr float   kFogMaxEnd = 150.0f;   // rzSetFog: além de kFogMaxGround a continuação acaba antes da neblina
+constexpr float   kFogMaxGround = 120.0f; // (o fim dela aparece: para um editor, não para o jogo)
+static_assert(kFogEndDefault <= kFogMaxGround && kFogMaxGround <= float(kSkirtExtent) && kFogMaxGround <= kFogMaxEnd,
               "a continuação tem que ir até o fim da neblina");
 
 // Transparência das texturas PCX (atlas e objetos): o índice 255 da paleta
@@ -606,6 +607,7 @@ struct RzContext {
     int32_t  decalCount = 0;
     float    decals[RZ_MAX_DECALS * 4] = {};
     float    decalColors[RZ_MAX_DECALS * 3] = {};
+    bool     skirtOn = true;                         // rzSetSkirt
     // A view-projection do último frame (rzGetView)
     rz::Mat4 lastViewProj = {};
 

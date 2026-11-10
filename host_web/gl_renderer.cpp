@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <string>
 #include "../host/host.hpp"
 #include "vec3f.hpp"
 #include "rz/renderizeitor.h"
@@ -150,8 +151,12 @@ bool gl_start(int width, int height, int quality)
     // library's); medium, one of 2048 up to 25 tiles; low, one of 512 up to 20
     static const struct { int size, cascades; float reach; } shadows[] = { { 0, 3, 0 }, { 2048, 1, 25 }, { 512, 1, 20 } };
     const auto &q = shadows[quality < 0 ? 0 : quality > 2 ? 2 : quality];
-    if (rzCreate(width, height, q.size, q.cascades, q.reach, &ctx) != RZ_OK)
+    if (rzCreate(width, height, q.size, q.cascades, q.reach, &ctx) != RZ_OK) {
+        const char *where = nullptr;
+        const int32_t error = rzGetError(nullptr, &where);
+        std::printf("OpenGL renderer: %s failed (error %d)\n", where ? where : "rzCreate", (int)error);
         return false;
+    }
     // the map's layers: height and tile, 256 x 256, change while playing;
     // the tiles before the heights, so the terrain's mesh is built once
     rzSetTerrainScale(ctx, 1.0f, 16.0f/256.0f);
@@ -165,8 +170,9 @@ bool gl_start(int width, int height, int quality)
     if (textures)
         rzLoadFallbackTexture(ctx, textures, size);
 
-    if (rzGetError(ctx, NULL) != RZ_OK){
-        //TODO actually say the error
+    const char *where = nullptr;
+    if (int32_t error = rzGetError(ctx, &where); error != RZ_OK){
+        std::printf("OpenGL renderer: %s failed (error %d)\n", where ? where : "?", (int)error);
         rzDestroy(ctx);
         return false;
     }
@@ -187,9 +193,11 @@ bool gl_start(int width, int height, int quality)
     updateCars();
 
     rzSetBackgroundColor(ctx, 255);
-    
-    //TODO one more error checking here
-    
+
+    // the cars' errors: said, but the game goes on (a car drawn wrong, or not at all)
+    if (int32_t error = rzGetError(ctx, &where); error != RZ_OK)
+        std::printf("OpenGL renderer: %s failed (error %d) loading the cars\n", where ? where : "?", (int)error);
+
     return true;
 }
 
@@ -371,6 +379,18 @@ void gl_free_camera(bool on, const float eye[3], const float forward[3])
         cam_filter.ready = false;
     }
     free_cam = on;
+}
+
+// The checkpoint editor's view: the fog as far as the library goes (150
+// tiles), to see the map from up high, and no terrain past its edge (where
+// the map ends is seen); off, the draw distance's fog and the terrain again.
+void gl_editor_view(bool on)
+{
+    if (on)
+        rzSetFog(ctx, 100, 150);
+    else
+        fog_changed = true;
+    rzSetSkirt(ctx, !on);
 }
 
 void gl_set_decals(const RzDecal *decals, int count)
