@@ -110,7 +110,7 @@ export function decodeCar(buffer) {
 
 // The triangles of a wheel: a short cylinder across the car, the sprites
 // of views 0 and 8 on its ends, the tread dark.
-function wheelTriangles(wheel, radius) {
+export function wheelTriangles(wheel, radius) {
     const len = Math.hypot(...wheel.axle), ax = wheel.axle.map((c) => c / len);
     // two directions across the axle: e1 up as much as it can be, e0 along the car
     let e1 = [-ax[2] * ax[0], -ax[2] * ax[1], 1 - ax[2] * ax[2]];

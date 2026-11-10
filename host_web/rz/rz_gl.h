@@ -139,6 +139,8 @@ RZ_GL(glGetUniformLocation) GLint glGetUniformLocation(GLuint program, const GLc
 RZ_GL(glUniform1i)         void glUniform1i(GLint loc, GLint v);
 RZ_GL(glUniform1f)         void glUniform1f(GLint loc, GLfloat v);
 RZ_GL(glUniform3f)         void glUniform3f(GLint loc, GLfloat x, GLfloat y, GLfloat z);
+RZ_GL(glUniform3fv)        void glUniform3fv(GLint loc, GLsizei count, const GLfloat* v);
+RZ_GL(glUniform4fv)        void glUniform4fv(GLint loc, GLsizei count, const GLfloat* v);
 RZ_GL(glGetUniformBlockIndex) GLuint glGetUniformBlockIndex(GLuint program, const GLchar* name);
 RZ_GL(glUniformBlockBinding)  void glUniformBlockBinding(GLuint program, GLuint block, GLuint binding);
 // transpose: sempre GL_FALSE no WebGL (setMatrices, rz_internal.h)

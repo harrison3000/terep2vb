@@ -84,10 +84,16 @@ screen's resolution; the default on a touch screen) or low (one of 512 up to 20 
 resolution). No map preview; Esc goes back to the list of maps. `make wasm-test` checks the game itself on 32-bit WebAssembly:
 the replays give the same frames as the Win16 port there too.
 
-The page links to a car editor (`web/car_editor/`: `index.html`, `cartool.js`): a carN.dat as text, with
+The page links to a car editor (`web/car_editor/`): a carN.dat as text (`cartool.js`), with
 sections for the header, the vertices, the springs and the drawing program (BASIC-like, the
 points as `vertex[n]`), to edit and turn into a .dat again; a file decoded and encoded unchanged
-comes out byte for byte the same (all the cars in data/ do).
+comes out byte for byte the same (all the cars in data/ do). Its 3D tab edits the same text
+(`cardoc.js`, `carview.js`, `editor.js`): vertices dragged with the mouse, the springs following;
+springs and flat polygons added and removed; a symmetric mode, where what is done to one side of the
+car is done to the other; the car's .pcx for its texture and colours; and a base car (`basecar.js`),
+a plank on four wheels, to start a car from nothing; a Wavefront .obj imported as the car's body
+(`objimport.js`), scaled and simplified to what a car can hold (59 vertices, 10000 bytes), its vertices
+on springs to the body. The texture coordinates are still edited in the Text tab.
 
 ### Higher resolution
 

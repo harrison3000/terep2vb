@@ -242,7 +242,7 @@ int32_t rzSetCameraTarget(RzContext* ctx, int32_t id, int32_t vertex) {
 
 int32_t rzSetCamera(RzContext* ctx, int32_t mode) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
-    if (mode < RZ_CAMERA_FOLLOW || mode > RZ_CAMERA_OVERVIEW) return recordError(ctx, "rzSetCamera", RZ_ERR_INVALID_ARG);
+    if (mode < RZ_CAMERA_FOLLOW || mode > RZ_CAMERA_FREE) return recordError(ctx, "rzSetCamera", RZ_ERR_INVALID_ARG);
     ctx->cameraMode = mode;
     return RZ_OK;
 }
@@ -268,6 +268,63 @@ int32_t rzSetCameraInternalAxes(RzContext* ctx, const RzVertex* forward,
     ctx->internalForward = f;
     ctx->internalUp      = u;
     ctx->internalValid   = true;
+    return RZ_OK;
+}
+
+int32_t rzSetObjectDecals(RzContext* ctx, const RzDecal* decals, int32_t count) {
+    if (!ctx) return RZ_ERR_INVALID_ARG;
+    if (count < 0 || (count > 0 && !decals)) return recordError(ctx, "rzSetObjectDecals", RZ_ERR_INVALID_ARG);
+    if (count > RZ_MAX_DECALS) return recordError(ctx, "rzSetObjectDecals", RZ_ERR_SIZE);
+    for (int32_t i = 0; i < count; ++i) {
+        const RzDecal& d = decals[i];
+        const float v[] = { d.x, d.y, d.radius, d.alpha, d.r, d.g, d.b };
+        for (float f : v)
+            if (!(fabsf(f) < 1.0e6f)) return recordError(ctx, "rzSetObjectDecals", RZ_ERR_INVALID_ARG);   // NaN, infinito
+        if (!(d.radius > 0.0f)) return recordError(ctx, "rzSetObjectDecals", RZ_ERR_INVALID_ARG);
+    }
+    const float cs = ctx->cellSize;
+    for (int32_t i = 0; i < count; ++i) {
+        const RzDecal& d = decals[i];
+        float* p = ctx->decals + 4 * i;
+        p[0] = d.x * cs; p[1] = d.y * cs; p[2] = d.radius * cs; p[3] = d.alpha;   // legado -> mundo (x, z)
+        float* c = ctx->decalColors + 3 * i;
+        c[0] = d.r; c[1] = d.g; c[2] = d.b;
+    }
+    ctx->decalCount = count;
+    return RZ_OK;
+}
+
+int32_t rzSetCameraFree(RzContext* ctx, const RzVertex* eye, const RzVertex* forward) {
+    if (!ctx) return RZ_ERR_INVALID_ARG;
+    if (!eye || !forward) return recordError(ctx, "rzSetCameraFree", RZ_ERR_INVALID_ARG);
+    const float cs = ctx->cellSize;
+    const Vec3 e = { eye->x * cs, eye->z * cs, eye->y * cs };         // legado -> mundo
+    Vec3 f = { forward->x, forward->z, forward->y };
+    const float lf = sqrtf(dot(f, f));
+    if (!(lf > 1.0e-12f && lf < 1.0e30f) || !(fabsf(e.x) < 1.0e6f && fabsf(e.y) < 1.0e6f && fabsf(e.z) < 1.0e6f))
+        return recordError(ctx, "rzSetCameraFree", RZ_ERR_INVALID_ARG);   // nulo, NaN ou longe demais
+    f = { f.x / lf, f.y / lf, f.z / lf };
+    if (fabsf(f.y) > 0.9999f) return recordError(ctx, "rzSetCameraFree", RZ_ERR_INVALID_ARG);   // vertical
+    ctx->freeEye = e;
+    ctx->freeForward = f;
+    ctx->freeValid = true;
+    return RZ_OK;
+}
+
+int32_t rzGetView(const RzContext* ctx, float* out) {
+    if (!ctx || !out) return RZ_ERR_INVALID_ARG;
+    for (int32_t i = 0; i < RZ_VIEW_FLOATS; ++i) out[i] = 0.0f;
+    if (!ctx->camHasLast) return RZ_OK;
+    for (int32_t c = 0; c < 4; ++c)
+        for (int32_t r = 0; r < 4; ++r) out[c * 4 + r] = ctx->lastViewProj[r, c];
+    const Vec3 v[] = { ctx->eyePos, ctx->camForward };
+    for (int32_t k = 0; k < 2; ++k) {
+        out[16 + 3 * k] = v[k].x; out[17 + 3 * k] = v[k].y; out[18 + 3 * k] = v[k].z;
+    }
+    out[22] = ctx->fogOn ? 1.0f : 0.0f;
+    out[23] = ctx->fogOrigin.x; out[24] = ctx->fogOrigin.y; out[25] = ctx->fogOrigin.z;
+    out[26] = ctx->fogNear;     out[27] = ctx->fogFar;
+    out[28] = ctx->backgroundR; out[29] = ctx->backgroundG; out[30] = ctx->backgroundB;
     return RZ_OK;
 }
 

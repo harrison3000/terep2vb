@@ -6,7 +6,10 @@
 //   interna          no vértice-alvo, orientada pelos eixos do host
 //                    (rzSetCameraInternalAxes); vindo da perseguição entra
 //                    num voo suave, nos outros casos (e na saída) corte seco;
-//   visão geral      fixa, o terreno inteiro (também sem alvo).
+//   visão geral      fixa, o terreno inteiro (também sem alvo);
+//   livre            onde o host mandar (rzSetCameraFree), sem alvo; corte
+//                    seco ao entrar, e ao sair as outras voam de onde ela
+//                    estava (como saindo da visão geral).
 
 #include <cmath>
 
@@ -248,13 +251,26 @@ Mat4 updateCamera(RzContext* ctx) {
     const bool hasTarget = target >= 0 && target < int32_t(ctx->objects.size()) &&
                            ctx->objects[target].alive && ctx->objects[target].positioned &&
                            ctx->cameraTargetVertex < ctx->objects[target].vertexCount();
-    const int32_t mode = hasTarget ? ctx->cameraMode : RZ_CAMERA_OVERVIEW;
-    const bool following = mode != RZ_CAMERA_OVERVIEW;    // perseguição, congelada ou interna
+    const bool freeCam = ctx->cameraMode == RZ_CAMERA_FREE && ctx->freeValid;
+    const int32_t mode = freeCam ? RZ_CAMERA_FREE
+                       : hasTarget && ctx->cameraMode != RZ_CAMERA_FREE ? ctx->cameraMode : RZ_CAMERA_OVERVIEW;
+    const bool following = mode != RZ_CAMERA_OVERVIEW && !freeCam;    // perseguição, congelada ou interna
     const bool internal  = mode == RZ_CAMERA_INTERNAL;
 
     Vec3 eye, at;
     Vec3 up = { 0.0f, 1.0f, 0.0f };                       // "cima" da câmera (a interna inclina)
-    if (internal) {
+    if (freeCam) {
+        // Sem transições nem estado: a perseguição recomeça do zero na volta
+        // (camLastFollowing falso: voa daqui até atrás do alvo)
+        eye = ctx->freeEye;
+        at = eye + Vec3{ ctx->freeForward.x * cs, ctx->freeForward.y * cs, ctx->freeForward.z * cs };
+        ctx->targetPos = eye;
+        ctx->aimValid = false;
+        ctx->followInitialized = false;
+        ctx->retargetPending = ctx->retargetActive = false;
+        ctx->overviewActive = false;
+        ctx->overviewBlend = 0.0f;
+    } else if (internal) {
         // Corte seco: sem transições. A perseguição fica pronta atrás do alvo
         // (pela frente da câmera interna), para a volta também ser um corte.
         const Vec3 raw = ctx->objects[target].world[ctx->cameraTargetVertex];
@@ -436,7 +452,7 @@ Mat4 updateCamera(RzContext* ctx) {
     ctx->fogNear = ctx->fogStart * cs + (ovNear - ctx->fogStart * cs) * b;
     ctx->fogFar  = ctx->fogEnd * cs + (ovFar - ctx->fogEnd * cs) * b;
     ctx->shadowWholeTerrain = b >= 0.5f;
-    ctx->wallOn = following && b < 0.5f;
+    ctx->wallOn = (following || freeCam) && b < 0.5f;
 
     const Mat4 view = lookAt(eye, at, up);
     ctx->camRight   = { view[0, 0], view[0, 1], view[0, 2] };

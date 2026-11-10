@@ -370,7 +370,7 @@ struct Object {
     float     wheelDiameter[4] = {};    // mundo
     float     wheelSteer = 0.0f;        // dianteiras; radianos, positivo = esquerda
     float     wheelRoll[4] = {};        // giro acumulado de cada roda; radianos
-    float     wheelSpeed = 0.0f;        // velocidade do carro (tiles/frame); gira as rodas
+    float     wheelSpeed[4] = {};       // velocidade de cada roda (tiles/frame); gira as rodas
     std::vector<TerrainVertex> wheelStaging;    // parte plana: pneu (+ faces sem textura)
     GLuint    wheelVao = 0, wheelVbo = 0;
     int32_t   wheelFlatVerts = 0;       // vértices em uso no VBO plano
@@ -427,6 +427,7 @@ struct ObjectProgram {
     GLint  model = -1;     // uModel: identidade, exceto nas rodas
     GLint  fromBuffer = -1; // 1: objetos (posições/normais do bloco); 0: faces das rodas
     GLint  texelMode = -1;  // kTexels*: o que o shader desenha da textura
+    GLint  decalCount = -1, decal = -1, decalColor = -1;   // rzSetObjectDecals
     ShadowUniforms shadow;
     FogUniforms    fog;
 };
@@ -595,6 +596,18 @@ struct RzContext {
     int32_t cameraTargetObject = -1;
     int32_t cameraTargetVertex = 0;
     int32_t cameraMode = RZ_CAMERA_FOLLOW;          // rzSetCamera
+
+    // Câmera livre (rzSetCameraFree): no mundo, forward unitário
+    bool     freeValid = false;
+    rz::Vec3 freeEye     = { 0.0f, 0.0f, 0.0f };
+    rz::Vec3 freeForward = { 0.0f, 0.0f, -1.0f };
+    // Discos projetados nos objetos (rzSetObjectDecals): x, z (mundo), raio,
+    // alfa e a cor de cada um
+    int32_t  decalCount = 0;
+    float    decals[RZ_MAX_DECALS * 4] = {};
+    float    decalColors[RZ_MAX_DECALS * 3] = {};
+    // A view-projection do último frame (rzGetView)
+    rz::Mat4 lastViewProj = {};
 
     // Câmera interna (rzSetCameraInternalAxes): base ortonormal no mundo
     bool     internalValid = false;

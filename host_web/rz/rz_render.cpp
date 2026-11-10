@@ -160,6 +160,9 @@ bool createRenderer(RzContext* ctx) {
     o.model    = glGetUniformLocation(o.program, "uModel");
     o.fromBuffer = glGetUniformLocation(o.program, "uFromBuffer");
     o.texelMode = glGetUniformLocation(o.program, "uTexelMode");
+    o.decalCount = glGetUniformLocation(o.program, "uDecalCount");
+    o.decal      = glGetUniformLocation(o.program, "uDecal");
+    o.decalColor = glGetUniformLocation(o.program, "uDecalColor");
     glUseProgram(o.program);
     setMatrix(o.model, Mat4::identity());
     glUniform1i(o.fromBuffer, 0);
@@ -228,6 +231,7 @@ void destroyRenderer(RzContext* ctx) {
 void renderFrame(RzContext* ctx) {
     ctx->frameTime += ctx->frameStep;
     const Mat4 viewProj = updateCamera(ctx);
+    ctx->lastViewProj = viewProj;
 
     prepareObjects(ctx);
     renderShadowMaps(ctx);
@@ -257,6 +261,15 @@ void renderFrame(RzContext* ctx) {
         if (ctx->fogOn) drawSkirt(ctx, viewProj, true);   // continuação além do mapa: só com neblina
     }
 
+    {                                             // discos projetados (rzSetObjectDecals)
+        const ObjectProgram& o = ctx->objectProgram;
+        glUseProgram(o.program);
+        glUniform1i(o.decalCount, ctx->decalCount);
+        if (ctx->decalCount) {
+            glUniform4fv(o.decal, ctx->decalCount, ctx->decals);
+            glUniform3fv(o.decalColor, ctx->decalCount, ctx->decalColors);
+        }
+    }
     drawObjects(ctx, viewProj);
     drawWheels(ctx, viewProj);                    // pneus das rodas: programa do terreno, sem textura
     drawWheelFaces(ctx, viewProj);                // faces das rodas: programa dos objetos, texturizadas

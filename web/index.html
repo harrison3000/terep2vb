@@ -12,17 +12,22 @@
   h1 { font-size: 1.4em; }
   #maps button { display: block; margin: 4px 0; padding: 6px 12px; font: inherit; cursor: pointer; }
   #chooser.loading button { opacity: 0.5; cursor: progress; }
-  #maps button:disabled, #playZip:disabled { opacity: 0.5; cursor: default; }
+  #maps button:disabled, #playZip:disabled, #playZipCheckpoints:disabled { opacity: 0.5; cursor: default; }
   .missing { margin: 0 0 8px 12px; color: #e9a; }
   #previews { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin: 8px 0; }
   #previews canvas { max-width: 192px; height: auto; image-rendering: pixelated; background: #000; }
-  #playZip { padding: 6px 18px; font: inherit; cursor: pointer; }
+  #playZip, #playZipCheckpoints { padding: 6px 18px; font: inherit; cursor: pointer; }
   .small { color: #999; font-size: 0.9em; }
   .options label { display: block; margin: 4px 0; }   /* one option a line */
   #game { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }
   #screen { image-rendering: pixelated; }
   #gl, #overlay { position: fixed; inset: 0; width: 100vw; height: 100vh; }
   #minimap { position: fixed; right: 2vmin; bottom: 2vmin; }
+  /* The checkpoint editor (checkpoints.js, editCheckpoints() in the console) */
+  #checkpointEditor { position: fixed; top: 8px; right: 8px; z-index: 10; width: min(24em, calc(100vw - 32px));
+    max-height: calc(100vh - 32px); overflow: auto; padding: 8px; background: #000c; border-radius: 6px; }
+  #checkpointEditor p { margin: 6px 0; }
+  #checkpointEditor textarea { box-sizing: border-box; width: 100%; height: 16em; font: 13px/1.3 monospace; }
   /* On a touch screen: car 1's controls over the game, the minimap at the top */
   #touch { position: fixed; inset: 0; pointer-events: none; user-select: none; -webkit-user-select: none; }
   #touch button { position: absolute; pointer-events: auto; touch-action: none; width: 16vmin; height: 16vmin;
@@ -47,21 +52,21 @@
   <h1>Terep2 Web</h1>
   <p class="options"><label>Load from <select id="source">
     <option value="zip">The Terep2 30th Anniversary Edition zip</option>
-    <option value="folder">A track folder</option>
+    <option value="folder">A map folder</option>
   </select></label></p>
   <div id="fromZip">
   <p><input type="file" id="zip" accept=".zip"></p>
   <div id="anniversary" class="options" hidden>
-    <label>Track <select id="track"></select></label>
+    <label>Map <select id="track"></select></label>
     <label>Car <select id="carModel"></select></label>
     <label>Car texture <select id="carTexture"></select></label>
     <div id="previews">
-      <canvas id="trackPreview" width="256" height="256" title="The track (col.pcx)" hidden></canvas>
+      <canvas id="trackPreview" width="256" height="256" title="The map (col.pcx)" hidden></canvas>
       <canvas id="carPreview" width="256" height="192" title="The car"></canvas>
       <canvas id="texturePreview" title="The car's texture" hidden></canvas>
     </div>
     <p id="trackMissing" class="small missing"></p>
-    <button id="playZip">Play</button>
+    <button id="playZip">Play</button> <button id="playZipCheckpoints" hidden>Play with checkpoints</button>
   </div>
   </div>
   <div id="fromFolder" hidden>
@@ -106,7 +111,7 @@
   F6 second view's camera, F9 split screen, F10 fog, Tab / Q change car, [ ] gravity.
   Esc goes back here (on a touch screen: the buttons on the screen drive car 1, ✕ goes back). With OpenGL: keypad + − / * move the chase camera; the render scale and the
   split screen are the software renderer's; the draw distance is OpenGL's.</p>
-  <p class="small"><a href="car_editor/">Car editor</a>: a car file (carN.dat) as text, to edit and save again.</p>
+  <p class="small"><a href="car_editor/">Car editor</a>: a car file (carN.dat), to edit in 3D or as text and save again.</p>
 </div>
 <div id="game" hidden><canvas id="screen"></canvas><canvas id="gl"></canvas><canvas id="overlay"></canvas>
   <canvas id="minimap"></canvas>

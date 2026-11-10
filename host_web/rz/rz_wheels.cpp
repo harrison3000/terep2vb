@@ -282,18 +282,16 @@ void freeWheels(Object& o) {
     o.wheelCapVao = 0;
 }
 
-// Antes dos passes do frame (junto com prepareObjects). Com velocidade, adianta
-// o giro de cada roda neste frame: ângulo = distância andada / raio (cada roda
+// Antes dos passes do frame (junto com prepareObjects). Adianta o giro de cada
+// roda neste frame, pela velocidade dela: ângulo = distância andada / raio (cada roda
 // pelo seu diâmetro; positivo = para a frente). Refaz a malha local só se
 // rodas/faces mudaram; todo frame, só as quatro matrizes (wheelModel).
 void prepareWheels(RzContext* ctx, Object& o) {
     if (o.wheelStaging.empty() || !o.positioned) return;
-    if (o.wheelSpeed != 0.0f) {
-        const float dist = o.wheelSpeed * ctx->cellSize * ctx->frameStep;   // tiles/frame -> mundo, neste frame
-        for (int32_t i = 0; i < 4; ++i) {
-            o.wheelRoll[i] -= dist / (0.5f * o.wheelDiameter[i]);   // -: topo vai para a frente
-            o.wheelRoll[i] = fmodf(o.wheelRoll[i], 2.0f * kPi);
-        }
+    for (int32_t i = 0; i < 4; ++i) {
+        const float dist = o.wheelSpeed[i] * ctx->cellSize * ctx->frameStep;   // tiles/frame -> mundo, neste frame
+        o.wheelRoll[i] -= dist / (0.5f * o.wheelDiameter[i]);   // -: topo vai para a frente
+        o.wheelRoll[i] = fmodf(o.wheelRoll[i], 2.0f * kPi);
     }
     Vec3 u, fwd[2], axis[2];
     wheelFrame(o, &u, fwd, axis);
@@ -415,13 +413,13 @@ int32_t rzSetObjectWheels(RzContext* ctx, int32_t id, const RzWheel* wheels) {
 
     const float cs = ctx->cellSize;
     o.wheelSteer = 0.0f;
-    o.wheelSpeed = 0.0f;
     o.wheelOuterResolved = false;      // redecide interna/externa para as novas rodas
     for (int32_t i = 0; i < 4; ++i) {
         o.wheelVertex[i]   = wheels[i].hubVertex;
         o.wheelFront[i]    = wheels[i].front ? 1 : 0;
         o.wheelDiameter[i] = wheels[i].diameter * cs;
         o.wheelRoll[i]     = 0.0f;
+        o.wheelSpeed[i]    = 0.0f;
     }
     if (!o.wheelVao) {                                          // carga: aloca uma vez
         o.wheelStaging.resize(size_t(4) * kWheelVertices);     // pneu + (faces pretas, se sem textura)
@@ -464,11 +462,12 @@ int32_t rzSetObjectWheelFaces(RzContext* ctx, int32_t id,
     return RZ_OK;
 }
 
-int32_t rzSetObjectWheelSpin(RzContext* ctx, int32_t id, float speed) {
-    if (!validId(ctx, id) || !std::isfinite(speed)) return recordError(ctx, "rzSetObjectWheelSpin", RZ_ERR_INVALID_ARG);
+int32_t rzSetObjectWheelSpin(RzContext* ctx, int32_t id, const float* speeds) {
+    if (!validId(ctx, id) || !speeds) return recordError(ctx, "rzSetObjectWheelSpin", RZ_ERR_INVALID_ARG);
+    for (int32_t i = 0; i < 4; ++i) if (!std::isfinite(speeds[i])) return recordError(ctx, "rzSetObjectWheelSpin", RZ_ERR_INVALID_ARG);
     Object& o = ctx->objects[id];
     if (o.wheelStaging.empty()) return recordError(ctx, "rzSetObjectWheelSpin", RZ_ERR_INVALID_ARG);   // sem rzSetObjectWheels
-    o.wheelSpeed = speed;
+    for (int32_t i = 0; i < 4; ++i) o.wheelSpeed[i] = speeds[i];
     return RZ_OK;
 }
 

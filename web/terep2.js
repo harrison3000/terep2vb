@@ -2,8 +2,10 @@
 // locally, nothing is uploaded), runs the game in terep2.wasm and draws it: the game's own
 // picture on a 2D canvas, or the OpenGL renderer's with WebGL 2 (webgl.js) and its text over it.
 import { webglImports } from './webgl.js';
-import { baseName, openAnniversary, trackFiles } from './anniversary.js';
+import { baseName, openAnniversary, trackFiles, trackTitle } from './anniversary.js';
 import { decodeCar, decodePcx, drawCar, drawPcx } from './preview.js';
+import { checkpointsAfterFrame, checkpointsBeforeFrame, checkpointsKey, checkpointsMinimap, checkpointsOverlay, checkpointsOverlayOn,
+         startCheckpoints, stopCheckpoints } from './checkpoints.js';
 
 const $ = (id) => document.getElementById(id);
 const touchScreen = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
@@ -126,6 +128,8 @@ function drawMinimap() {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(mapImage, 0, 0, size, size);
     ctx.globalAlpha = 1;
+    if (webgl)
+        checkpointsMinimap(ctx, k);
     const n = wasm.web_car_count(), followed = wasm.web_car_followed();
     const half = Math.max(size / 80, 1.5);
     ctx.font = `${Math.max(10, Math.round(size / 18))}px monospace`;
@@ -152,6 +156,7 @@ function drawMinimap() {
 
 let wasm = null;                    // the module's exports
 let maps = new Map();               // folder path -> its files ({ path, read })
+let mapTitles = new Map();          // folder path -> its name (inst.inf's, else the path)
 let playing = false, last = 0;
 let webgl = false;                  // this game is drawn by the OpenGL renderer
 let quality = 'high';               // ...in this quality (QUALITIES)
@@ -236,13 +241,20 @@ const folderMap = (dir) => maps.get(dir).map((f) => [baseName(f.path), f]);
 function showMaps() {
     const list = $('maps');
     list.innerHTML = '';
-    for (const dir of [...maps.keys()].sort()) {
+    for (const dir of [...maps.keys()].sort((a, b) => mapTitles.get(a).localeCompare(mapTitles.get(b)))) {
         const { playable, text } = checkMap(folderMap(dir));
         const b = document.createElement('button');
-        b.textContent = dir;
+        b.textContent = mapTitles.get(dir);
+        b.title = dir;
         b.disabled = !playable;
-        b.onclick = () => play(folderMap(dir));
+        b.onclick = () => play(folderMap(dir), baseName(dir));
         list.appendChild(b);
+        if (hasCheckpoints(baseName(dir))) {
+            const c = document.createElement('button');
+            checkpointsButton(c, playable);
+            c.onclick = () => play(folderMap(dir), baseName(dir), true);
+            list.appendChild(c);
+        }
         if (text) {
             const p = document.createElement('div');
             p.className = 'small missing';
@@ -267,7 +279,7 @@ function fillSelect(select, choices, none) {
             group.label = c.group;
             select.appendChild(group);
         }
-        group.appendChild(new Option(c.name.replace(/\.[^.]*$/, ''), k));
+        group.appendChild(new Option(c.title || c.name.replace(/\.[^.]*$/, ''), k));
     }
 }
 
@@ -275,7 +287,11 @@ async function openZip(file) {
     $('anniversary').hidden = true;
     anniversary = await openAnniversary(file);
     if (!anniversary.tracks.length || !anniversary.cars.length)
-        throw new Error('no track or no car in it: is it the 30th Anniversary Edition zip?');
+        throw new Error('no map or no car in it: is it the 30th Anniversary Edition zip?');
+    const withCheckpoints = await checkpointFiles;
+    for (const t of anniversary.tracks)
+        if (withCheckpoints.has(zipTrackName(t).toLowerCase()))
+            t.title += CHECKPOINTS_MARK;
     fillSelect($('track'), anniversary.tracks);
     fillSelect($('carModel'), anniversary.cars);
     fillSelect($('carTexture'), anniversary.textures, 'None (textures.pcx)');
@@ -360,22 +376,26 @@ function anniversaryMap() {
 }
 
 function showTrack() {
-    const { playable, text } = track ? checkMap(anniversaryMap()) : { playable: false, text: 'Reading the track...' };
+    const { playable, text } = track ? checkMap(anniversaryMap()) : { playable: false, text: 'Reading the map...' };
     $('playZip').disabled = !playable;
+    const choice = anniversary?.tracks[+$('track').value];
+    $('playZipCheckpoints').hidden = !choice || !hasCheckpoints(zipTrackName(choice));
+    checkpointsButton($('playZipCheckpoints'), playable);
     $('trackMissing').textContent = text;
 }
 
-// Copies the map's files ([name, file]) into the module and starts the game.
-// One at a time: while a map loads, more clicks do nothing.
+// Copies the map's files ([name, file]) into the module and starts the game
+// (name: the map's, for its checkpoints, played or not).  One at a time:
+// while a map loads, more clicks do nothing.
 let loading = false;
 
-async function play(files) {
+async function play(files, name, withCheckpoints = false) {
     if (loading || playing)
         return;
     loading = true;
     $('chooser').classList.add('loading');
     try {
-        await loadGame(files);
+        await loadGame(files, name, withCheckpoints);
     } catch (e) {
         console.error(e);
         alert('Could not start the game: ' + e);
@@ -385,7 +405,45 @@ async function play(files) {
     }
 }
 
-async function loadGame(files) {
+// The maps with checkpoints: the files of the page's checkpoints/ folder,
+// listed in its list.txt (one a line, the map's name, any case, and .txt),
+// read once: the map's name in lower case -> its file.
+let checkpointNames = new Set();               // the same names, once read
+const checkpointFiles = (async () => {
+    const files = new Map();
+    try {
+        const response = await fetch('checkpoints/list.txt');
+        if (response.ok)
+            for (const line of (await response.text()).split(/\r?\n/).map((l) => l.trim()).filter(Boolean))
+                files.set(line.replace(/\.[^.]*$/, '').toLowerCase(), line);
+    } catch (e) { /* none */ }
+    checkpointNames = new Set(files.keys());
+    return files;
+})();
+const CHECKPOINTS_MARK = ' 🏁';                  // after the name of a map that has them
+const hasCheckpoints = (name) => checkpointNames.has(name.toLowerCase());
+// A "play with checkpoints" button: greyed out, saying so, without WebGL
+function checkpointsButton(b, playable) {
+    const gl = $('renderer').value === 'webgl';
+    b.textContent = gl ? 'Play with checkpoints' : 'Play with checkpoints (GL only)';
+    b.disabled = !playable || !gl;
+}
+const zipTrackName = (choice) => choice.name.replace(/\.[^.]*$/, '');
+
+// A map's checkpoints (its file's text), or null.
+async function fetchCheckpoints(name) {
+    const file = (await checkpointFiles).get(name.toLowerCase());
+    if (!file)
+        return null;
+    try {
+        const response = await fetch('checkpoints/' + encodeURIComponent(file));
+        return response.ok ? await response.text() : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+async function loadGame(files, name, withCheckpoints) {
     if ($('sound').checked)
         startAudio();
     wasm.web_clear_files();
@@ -403,6 +461,7 @@ async function loadGame(files) {
     savePrefs();
     wasm.web_audio_start($('sound').checked && audio ? audio.sampleRate : 0);
     webgl = $('renderer').value === 'webgl';
+    const checkpoints = webgl && withCheckpoints ? await fetchCheckpoints(name) : null;
     quality = $('quality').value in QUALITIES ? $('quality').value : 'high';
     $('screen').hidden = webgl;
     $('gl').hidden = $('overlay').hidden = !webgl;
@@ -419,6 +478,8 @@ async function loadGame(files) {
         return;
     }
     prepareMinimap();
+    if (webgl)
+        startCheckpoints(wasm, $('gl'), name, checkpoints);
     camera = 3;                         // a new game starts on the chase camera
     playing = true;
     last = performance.now();
@@ -429,6 +490,7 @@ async function loadGame(files) {
 
 function stop() {
     playing = false;
+    stopCheckpoints();
     wasm.web_stop();
     if (webgl) {                        // the canvas keeps its last frame: not to be seen in the next game
         const gl = $('gl').getContext('webgl2');
@@ -503,6 +565,7 @@ function drawTexts() {
 // animation frame, by the time of both, so a frame is drawn every other one
 // (30 Hz on a 60 Hz screen); the physics stays at 120 Hz.
 let frameskip = false, skipNext = false;
+let wasOverlay = false;             // the checkpoints' text was on at the last frame
 
 function frame(now) {
     if (!playing)
@@ -513,11 +576,19 @@ function frame(now) {
     if (skipNext) {                     // frameskip: this one's time goes with the next
         return;
     }
+    if (webgl)
+        checkpointsBeforeFrame(now - last);
     const drawn = wasm.web_advance(now - last);
     last = now;
     playSamples();
     if (drawn && webgl) {
+        checkpointsAfterFrame();
+        const overlay = checkpointsOverlayOn();
+        if (overlay || wasOverlay)
+            textsShown = '';            // the race's or the editor's text: redrawn every frame (and cleared after)
+        wasOverlay = overlay;
         drawTexts();
+        checkpointsOverlay($('overlay').getContext('2d'));
         drawMinimap();
     } else if (drawn) {
         const w = wasm.web_width(), h = wasm.web_height();
@@ -550,7 +621,7 @@ function frame(now) {
 }
 
 function key(e, up) {
-    if (!playing)
+    if (!playing || checkpointsKey(e, up))
         return;
     if (e.code === 'Escape') {
         if (!up)
@@ -649,8 +720,13 @@ function pick(promise) {
     $('status').textContent = '';
     promise.catch((e) => { $('status').textContent = 'Could not read the files: ' + e.message; });
 }
-function openFiles(files) {
+async function openFiles(files) {
     maps = findMaps(files);
+    const dirOf = (f) => f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : '.';
+    const withCheckpoints = await checkpointFiles;
+    mapTitles = new Map(await Promise.all([...maps.keys()].map(async (dir) =>
+        [dir, (await trackTitle(files.filter((f) => dirOf(f) === dir)) || dir)
+              + (withCheckpoints.has(baseName(dir).toLowerCase()) ? CHECKPOINTS_MARK : '')])));
     showMaps();
 }
 // Where the game is loaded from: the zip or a folder, each with its own file picker.
@@ -676,7 +752,8 @@ $('carTexture').onchange = () => {
     showTrack();
     pick(previewTexture());
 };
-$('playZip').onclick = () => play(anniversaryMap());
+$('playZip').onclick = () => play(anniversaryMap(), zipTrackName(track.choice));
+$('playZipCheckpoints').onclick = () => play(anniversaryMap(), zipTrackName(track.choice), true);
 // Dropped: a zip is the 30th Anniversary Edition's, anything else folders of maps.
 addEventListener('dragover', (e) => { if (!playing) e.preventDefault(); });
 addEventListener('drop', (e) => {

@@ -68,13 +68,38 @@ function choices(files, dirs, ext) {
     return found;
 }
 
-// What the zip (a File) has: { tracks, cars, textures, shared }.
+// A track's own name, the second line of its inst.inf (if it has one): the
+// zip's or folder's name is DOS's, 8 letters at most.  An old DOS text, not
+// always UTF-8: then each byte a letter (Latin-1).
+export async function trackTitle(files) {
+    const inf = files.find((f) => baseName(f.path).toLowerCase() === 'inst.inf');
+    if (!inf)
+        return null;
+    const bytes = await inf.read();
+    let text;
+    try {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+        text = new TextDecoder('latin1').decode(bytes);
+    }
+    return text.split(/\r?\n/)[1]?.trim() || null;
+}
+
+// What the zip (a File) has: { tracks, cars, textures, shared }.  A track
+// has its files (its zip read) and its title, by which they are sorted.
 export async function openAnniversary(zip) {
     const files = readZip(await zip.arrayBuffer());
     const shared = files.filter((f) => f.path.toLowerCase() === SHARED_DIR.toLowerCase() + baseName(f.path).toLowerCase()
         && SHARED_FILES.includes(baseName(f.path).toLowerCase()));
+    const tracks = choices(files, TRACK_DIRS, /\.zip$/);
+    await Promise.all(tracks.map(async (t) => {
+        t.files = readZip(await t.file.read());
+        t.title = await trackTitle(t.files) || t.name.replace(/\.[^.]*$/, '');
+    }));
+    const groups = Object.values(TRACK_DIRS);
+    tracks.sort((a, b) => groups.indexOf(a.group) - groups.indexOf(b.group) || a.title.localeCompare(b.title));
     return {
-        tracks: choices(files, TRACK_DIRS, /\.zip$/),
+        tracks,
         cars: choices(files, CAR_DIRS, /\.dat$/),
         textures: choices(files, CAR_TEXTURE_DIRS, /\.pcx$/),
         shared,
@@ -83,5 +108,5 @@ export async function openAnniversary(zip) {
 
 // The files of a track (one of tracks), from its zip.
 export async function trackFiles(track) {
-    return readZip(await track.file.read());
+    return track.files;
 }

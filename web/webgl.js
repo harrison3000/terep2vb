@@ -140,6 +140,8 @@ export function webglImports(canvas, getMemory) {
         glUniform1i: (loc, v) => gl.uniform1i(locations[loc] ?? null, v),
         glUniform1f: (loc, v) => gl.uniform1f(locations[loc] ?? null, v),
         glUniform3f: (loc, x, y, z) => gl.uniform3f(locations[loc] ?? null, x, y, z),
+        glUniform3fv: (loc, count, p) => gl.uniform3fv(locations[loc] ?? null, new Float32Array(buffer()), p >> 2, count * 3),
+        glUniform4fv: (loc, count, p) => gl.uniform4fv(locations[loc] ?? null, new Float32Array(buffer()), p >> 2, count * 4),
         glGetUniformBlockIndex: (n, name) => gl.getUniformBlockIndex(obj(n), cstr(name)),
         glUniformBlockBinding: (n, block, binding) => gl.uniformBlockBinding(obj(n), block, binding),
         glUniformMatrix4fv: (loc, count, transpose, p) =>

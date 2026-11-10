@@ -38,6 +38,8 @@ struct File {
 std::vector<File> files;        // the map's, by their names (any case)
 
 bool running = false;
+bool paused = false;            // no physics ticks (the page's checkpoint editor)
+uint32_t ticks = 0;             // physics ticks since the start of the game
 bool opengl = false;            // this game is drawn by the OpenGL renderer
 int canvas_w = 1, canvas_h = 1; // the OpenGL renderer's canvas, in pixels (web_canvas_size)
 double tick_ms = 0, frame_ms = 0;  // time not yet spent on ticks / frames (a little below 0: early)
@@ -184,6 +186,8 @@ EXPORT("web_start") bool web_start(int scale, bool fix_ice, bool hide_banner, bo
     }
     tick_ms = frame_ms = 0;
     since_frame_ms = FRAME_MS;
+    paused = false;
+    ticks = 0;
     running = true;
     return true;
 }
@@ -210,6 +214,46 @@ EXPORT("web_draw_distance") void web_draw_distance(int tiles)
                              : tiles > DRAW_DISTANCE_MAX ? DRAW_DISTANCE_MAX : tiles);
 }
 
+// The physics stopped (the cars stand still, the picture goes on) or not.
+EXPORT("web_pause") void web_pause(bool on)
+{
+    paused = on;
+}
+
+// The physics ticks since the start of the game (120 a second; none while
+// paused): the page's race clock.
+EXPORT("web_ticks") uint32_t web_ticks() { return ticks; }
+
+// The OpenGL renderer's free camera, for the page's checkpoint editor (see
+// gl_free_camera): on, at (x, y, z) looking along (fx, fy, fz), in tiles,
+// x a column, y a row, z up; off, back to the game's camera.
+EXPORT("web_free_camera") void web_free_camera(bool on, float x, float y, float z, float fx, float fy, float fz)
+{
+    if (running && opengl) {
+        const float eye[3] = { x, y, z }, forward[3] = { fx, fy, fz };
+        gl_free_camera(on, eye, forward);
+    }
+}
+
+// Discs projected from above on the cars (the checkpoints, as they are on
+// the ground): count RzDecal (8 floats each) at p, up to RZ_MAX_DECALS.
+EXPORT("web_decals") void web_decals(const RzDecal *p, int count)
+{
+    if (running && opengl)
+        gl_set_decals(p, count);
+}
+
+// The OpenGL renderer's camera of the last frame, for the page to draw over
+// it (the checkpoints): RZ_VIEW_FLOATS floats, see rzGetView; null without it.
+EXPORT("web_view") const float *web_view()
+{
+    return running && opengl ? gl_view() : nullptr;
+}
+
+// The map's heights: 256 x 256 bytes, row by row (a row is a y); a byte is
+// 16/256 of a tile.
+EXPORT("web_heightmap") const uint8_t *web_heightmap() { return heightmap(); }
+
 // A key: a PC scancode (set 1), | 0x80 when released.
 EXPORT("web_key") void web_key(int scancode)
 {
@@ -229,7 +273,10 @@ EXPORT("web_advance") bool web_advance(double ms)
     if (ms > 250)
         ms = 250;                       // after a stall (a hidden tab): do not try to catch up
     for (tick_ms += ms; tick_ms >= TICK_MS - TICK_EARLY_MS; tick_ms -= TICK_MS) {
+        if (paused)
+            continue;
         physics_tick();
+        ticks++;
         if (opengl)
             gl_tick();
     }
@@ -312,6 +359,30 @@ EXPORT("web_car_count") int web_car_count() { return running ? world.num_cars : 
 EXPORT("web_car_followed") int web_car_followed() { return world.player_car[0]; }
 EXPORT("web_car_x") double web_car_x(int i) { return car_get(i).ref_vertex().pos.x.raw / 16777216.0; }
 EXPORT("web_car_y") double web_car_y(int i) { return car_get(i).ref_vertex().pos.y.raw / 16777216.0; }
+// Its wheels (the vertices that are one), where each one is, as the
+// reference point: the page's race (a checkpoint is passed when a wheel goes
+// in).
+static const CarVertex *car_wheel(int i, int k)
+{
+    for (const CarVertex &v : car_get(i).points)
+        if (v.is_wheel() && k-- == 0)
+            return &v;
+    return nullptr;
+}
+EXPORT("web_car_wheel_count") int web_car_wheel_count(int i)
+{
+    int n = 0;
+    for (const CarVertex &v : car_get(i).points)
+        n += v.is_wheel();
+    return n;
+}
+EXPORT("web_car_wheel_x") double web_car_wheel_x(int i, int k) { return car_wheel(i, k)->pos.x.raw / 16777216.0; }
+EXPORT("web_car_wheel_y") double web_car_wheel_y(int i, int k) { return car_wheel(i, k)->pos.y.raw / 16777216.0; }
+// heights: in tiles (as the OpenGL renderer's, kept off the underflow of a
+// car upside down in a low part of the map, gl_renderer.cpp's tiles())
+static double height_tiles(const Pos &p) { return (p.z.raw < 0xfe000000 ? p.z.raw : 0) / 16777216.0; }
+EXPORT("web_car_wheel_z") double web_car_wheel_z(int i, int k) { return height_tiles(car_wheel(i, k)->pos); }
+EXPORT("web_car_z") double web_car_z(int i) { return height_tiles(car_get(i).ref_vertex().pos); }
 EXPORT("web_car_heading") int web_car_heading(int i)
 {
     const CarVertex *v = car_get(i).vertices();

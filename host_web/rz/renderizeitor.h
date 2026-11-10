@@ -64,6 +64,17 @@ typedef char RzAssertWheelSize[sizeof(RzWheel) == 8 ? 1 : -1];
 typedef char RzAssertWheelFaceSize[sizeof(RzWheelFace) == 16 ? 1 : -1];
 typedef char RzAssertSpriteSize[sizeof(RzSprite) == 24 ? 1 : -1];
 
+/* Um disco projetado de cima nos objetos (ver rzSetObjectDecals). 32 bytes. */
+typedef struct RzDecal {
+    float x, y;            /* centro, em tiles como RzVertex (coluna, linha) */
+    float radius;          /* tiles */
+    float alpha;           /* multiplica o desenho (0..1) */
+    float r, g, b;         /* a cor, 0..1 */
+    float pad;
+} RzDecal;
+typedef char RzAssertDecalSize[sizeof(RzDecal) == 32 ? 1 : -1];
+#define RZ_MAX_DECALS 4
+
 #define RZ_OK               0
 #define RZ_ERR_INVALID_ARG  1   /* ponteiro nulo ou parâmetro fora de faixa */
 #define RZ_ERR_SIZE         2   /* dimensão acima do limite ou não suportada */
@@ -254,14 +265,15 @@ int32_t rzSetObjectWheels(RzContext* ctx, int32_t id, const RzWheel* wheels);
 int32_t rzSetObjectWheelFaces(RzContext* ctx, int32_t id,
                               const RzWheelFace* outer, const RzWheelFace* inner);
 
-/* Velocidade do carro (tiles por frame, = distância andada neste frame, na
-   mesma escala dos vértices). A cada frame renderizado as rodas giram por
-   distância / raio, cada uma pelo seu próprio diâmetro (dianteiras e traseiras
-   podem diferir); positivo = para a frente; speed em tiles por frame de 60 Hz
+/* Velocidade de cada roda (speeds[4], na ordem de rzSetObjectWheels; tiles por
+   frame, = distância andada neste frame, na mesma escala dos vértices). A cada
+   frame renderizado cada roda gira por distância / raio, com a sua velocidade
+   e o seu diâmetro; positivo = para a frente; tiles por frame de 60 Hz
    (rzRender multiplica pelo tempo do frame). Fica guardada: chame uma vez por
    frame (ou quando mudar). 0 para parar. Não aloca.
-   RZ_ERR_INVALID_ARG sem rzSetObjectWheels antes ou com valor não finito. */
-int32_t rzSetObjectWheelSpin(RzContext* ctx, int32_t id, float speed);
+   RZ_ERR_INVALID_ARG sem rzSetObjectWheels antes, com ponteiro nulo ou valor
+   não finito. */
+int32_t rzSetObjectWheelSpin(RzContext* ctx, int32_t id, const float* speeds);
 
 /* Esterçamento das duas rodas dianteiras (radianos; positivo vira para a
    esquerda, anti-horário visto de cima); as traseiras ficam retas. Não aloca.
@@ -323,6 +335,17 @@ int32_t rzDestroyObject(RzContext* ctx, int32_t id);
 int32_t rzSetSprites(RzContext* ctx, const RzSprite* sprites, int32_t count);
 
 
+/* Discos projetados de cima para baixo nos objetos (o host desenha os
+   mesmos no chão: os checkpoints da página): em todo ponto de um objeto
+   dentro do círculo, na vertical, o desenho do disco por cima da cor,
+   translúcido no meio, uma faixa da cor e a borda branca. Substitui os
+   anteriores (0 tira todos); até RZ_MAX_DECALS. Barata, pode ser chamada
+   todo frame. Erros (nada muda): RZ_ERR_INVALID_ARG (nulo com count > 0,
+   count < 0, raio <= 0 ou valores não finitos), RZ_ERR_SIZE (count >
+   RZ_MAX_DECALS). */
+int32_t rzSetObjectDecals(RzContext* ctx, const RzDecal* decals, int32_t count);
+
+
 /* Faces: as que aparecem em sentido anti-horário na tela são descartadas
    (convenção do legado: vista de fora, a face está em sentido horário). */
 
@@ -337,6 +360,8 @@ int32_t rzSetSprites(RzContext* ctx, const RzSprite* sprites, int32_t count);
 #define RZ_CAMERA_FOLLOW_FREEZE  2   /* a posição da perseguição congela onde está,
                                         mas continua olhando para o alvo */
 #define RZ_CAMERA_OVERVIEW       3   /* visão geral fixa do terreno inteiro */
+#define RZ_CAMERA_FREE           4   /* livre, onde o host mandar (rzSetCameraFree);
+                                        não precisa de alvo */
 
 /* Escolhe o modo da câmera (RZ_CAMERA_*). Entre perseguição, congelada e
    visão geral a câmera faz a transição suave de sempre; a interna entra e
@@ -361,6 +386,15 @@ int32_t rzSetCameraTarget(RzContext* ctx, int32_t id, int32_t vertex);
 int32_t rzSetCameraInternalAxes(RzContext* ctx, const RzVertex* forward,
                                 const RzVertex* up);
 
+/* Câmera livre (RZ_CAMERA_FREE): o olho em eye e olhando na direção
+   forward, nos eixos do legado (como RzVertex: x coluna, y linha, z para
+   cima, em tiles), com o cima da imagem para cima (forward não pode ser
+   vertical). Corte seco ao entrar; ao sair, as outras câmeras voam de onde
+   ela estava. A neblina e a parede de limite ficam em volta do olho. Feita
+   para ser chamada todo frame. Erros: RZ_ERR_INVALID_ARG (nulos, não
+   finitos, forward nulo ou vertical). */
+int32_t rzSetCameraFree(RzContext* ctx, const RzVertex* eye, const RzVertex* forward);
+
 /* Campo de visão vertical, em graus, de 10 a 120 (padrão 50); o horizontal
    sai da proporção da imagem. Vale para todos os modos de câmera, a partir do
    próximo rzRender. Barata: pode ser chamada todo frame (ex.: zoom). FOV
@@ -377,6 +411,20 @@ int32_t rzSetCameraFov(RzContext* ctx, float degrees);
              atrasada. */
 int32_t rzSetCameraFollow(RzContext* ctx, float distance, float height,
                           float stiffness);
+
+/* A câmera do último rzRender, para o host desenhar por cima no mesmo
+   canvas (o depth buffer do frame continua lá até o navegador mostrá-lo).
+   Coordenadas do mundo do renderer: (x, y, z) = (coluna, altura, linha) em
+   tiles (com cellSize 1; altura do terreno = byte x heightScale). out recebe
+   RZ_VIEW_FLOATS floats:
+     0..15   view-projection, por colunas (como glUniformMatrix4fv sem transpor)
+     16..18  posição do olho      19..21  direção para onde olha (unitária)
+     22      neblina ligada (0/1) 23..25  origem da neblina
+     26, 27  começo e fim da neblina (distância 3D à origem)
+     28..30  cor de fundo / da neblina, RGB 0..1
+   Antes do primeiro rzRender, tudo 0. */
+#define RZ_VIEW_FLOATS 32
+int32_t rzGetView(const RzContext* ctx, float* out);
 
 /* Avança a câmera e renderiza o frame no canvas. Não aloca. frames: o tempo
    desde o rzRender anterior, em frames de 60 Hz (1 a 60 fps, 2 a 30...): a

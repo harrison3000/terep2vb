@@ -5,37 +5,107 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Car Editor</title>
 <style>
-  :root { color-scheme: dark; --bg: #111; --fg: #ddd; --dim: #999; --bad: #f77; --ok: #7d7; }
+  :root { color-scheme: dark; --bg: #111; --fg: #ddd; --dim: #999; --bad: #f77; --ok: #7d7; --line: #333; --accent: #ffdc50; }
   [hidden] { display: none !important; }
-  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; }
-  main { max-width: 70em; margin: 1.5em auto; padding: 0 16px; }
-  h1 { font-size: 1.4em; margin: 0 0 0.5em; }
-  .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 0.6em 0; }
-  button, label.button { font: inherit; padding: 5px 12px; cursor: pointer; }
-  textarea { width: 100%; height: 70vh; box-sizing: border-box; background: #000; color: var(--fg);
-             font: 13px/1.35 ui-monospace, monospace; border: 1px solid #333; padding: 8px; tab-size: 4; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif;
+         display: flex; flex-direction: column; }
+  header { padding: 10px 16px 0; }
+  h1 { font-size: 1.3em; margin: 0; }
+  h2 { font-size: 1.05em; margin: 0 0 0.5em; }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; margin: 8px 0; }
+  .group { display: inline-flex; flex-wrap: wrap; gap: 2px; align-items: center; }
+  .sep { width: 1px; height: 1.4em; background: var(--line); margin: 0 4px; }
+  button, label.button { font: inherit; padding: 4px 10px; cursor: pointer; }
+  button:disabled { cursor: default; }
+  button.on { background: var(--accent); color: #000; border-color: var(--accent); }
+  label.check { display: inline-flex; gap: 4px; align-items: center; color: var(--dim); font-size: 0.9em; }
   .small { color: var(--dim); font-size: 0.9em; }
   #message.bad { color: var(--bad); }
   #message.ok { color: var(--ok); }
   a { color: #8cf; }
-  .warning { background: #3a2a00; border: 1px solid #a70; color: #fd8; padding: 8px 12px; border-radius: 4px; }
+  .warning { background: #3a2a00; border: 1px solid #a70; color: #fd8; padding: 4px 10px; border-radius: 4px; margin: 6px 0 0; font-size: 0.9em; }
+  .warn { color: #fd8; font-size: 0.9em; }
+  #viewTab { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 16px 12px; }
+  .work { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 19em; grid-template-rows: minmax(0, 1fr); gap: 10px; }
+  #stage { position: relative; min-height: 0; border: 1px solid var(--line); overflow: hidden; }
+  #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #overlay { touch-action: none; cursor: crosshair; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center;
+           padding: 16px; color: var(--dim); pointer-events: none; }
+  #panel { border: 1px solid var(--line); padding: 12px; overflow-y: auto; min-height: 0; }
+  #panel p { margin: 0.5em 0; }
+  .field { display: grid; grid-template-columns: 4.5em 1fr; align-items: center; margin: 4px 0; }
+  .field input, .field select { font: inherit; width: 100%; box-sizing: border-box; padding: 2px 4px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .help { padding-left: 1.2em; margin: 1em 0 0; }
+  .help li { margin: 0.3em 0; }
+  .palette { display: grid; grid-template-columns: repeat(16, 1fr); gap: 1px; margin: 6px 0; }
+  .palette button { aspect-ratio: 1; padding: 0; border: 0; min-width: 0; }
+  #textTab { flex: 1; min-height: 0; padding: 0 16px 12px; overflow-y: auto; }
+  textarea { width: 100%; height: 70vh; box-sizing: border-box; background: #000; color: var(--fg);
+             font: 13px/1.35 ui-monospace, monospace; border: 1px solid var(--line); padding: 8px; tab-size: 4; }
+  @media (max-width: 800px) {
+    html, body { height: auto; }
+    .work { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
+    #stage { height: 60vh; }
+  }
 </style>
 </head>
 <body>
-<main>
+<header>
   <h1>Car Editor</h1>
   <p class="warning"><b>Warning:</b> the text format is not stable yet and may change at any time,
   without notice. Keep your cars as .dat files; a text saved now may not open in a later version.</p>
-  <p class="small">Open a car file (carN.dat): it is turned into text here, in the browser (nothing is
-  uploaded). Edit it and save it as a .dat again; the text can be saved and opened too. A file
-  opened and saved unchanged comes out byte for byte the same.
-  <a href="../">Back to the game</a>.</p>
   <div class="bar">
-    <input type="file" id="open" accept=".dat,.DAT,.txt">
+    <input type="file" id="open" accept=".dat,.DAT,.txt,.pcx,.PCX,.obj,.OBJ" multiple>
+    <input type="file" id="importObj" accept=".obj,.OBJ" hidden>
+    <button id="baseCar" title="Start a car from nothing: a plank on four wheels">Load base car</button>
     <button id="saveDat">Save .dat</button>
     <button id="saveText">Save text</button>
+    <span class="sep"></span>
+    <span class="group"><button id="tabView" class="on">3D</button><button id="tabText">Text</button></span>
     <span id="message"></span>
+    <a class="small" href="../" style="margin-left: auto">Back to the game</a>
   </div>
+</header>
+<section id="viewTab">
+  <div class="bar">
+    <span class="group">
+      <button data-mode="vertex">Vertices</button><button data-mode="spring">Springs</button><button data-mode="polygon">Faces</button>
+    </span>
+    <span class="sep"></span>
+    <span class="group">
+      <button data-axis="free" class="on" title="Move freely, facing the camera">Free</button><button data-axis="x">X</button><button data-axis="y">Y</button><button data-axis="z">Z</button>
+    </span>
+    <label class="check"><input type="checkbox" id="symmetric" checked title="What is done to one side of the car is done to the other: moves, new and removed vertices, springs and faces">Symmetric</label>
+    <label class="check"><input type="checkbox" id="snap" checked title="To a map unit, 1/256 of a tile">Snap</label>
+    <label class="check"><input type="checkbox" id="follow" checked title="Springs on what moves take the new length as their rest">Springs follow</label>
+    <span class="sep"></span>
+    <span class="group">
+      <button id="camPersp">3/4</button><button id="camTop">Top</button><button id="camFront">Front</button><button id="camSide">Side</button><button id="camBack">Back</button><button id="camFrame" title="Frame the car (F)">Frame</button>
+    </span>
+    <label class="check"><input type="checkbox" id="ortho">Ortho</label>
+    <span class="sep"></span>
+    <label class="check"><input type="checkbox" id="show-solid" checked>Solid</label>
+    <label class="check"><input type="checkbox" id="show-springs" checked>Springs</label>
+    <label class="check"><input type="checkbox" id="show-labels">Numbers</label>
+    <label class="check"><input type="checkbox" id="show-backs" title="The sides the game does not draw, in red">Backs</label>
+    <span class="sep"></span>
+    <span class="group"><button id="undo" disabled>Undo</button><button id="redo" disabled>Redo</button></span>
+  </div>
+  <div class="work">
+    <div id="stage">
+      <canvas id="solid"></canvas>
+      <canvas id="overlay"></canvas>
+      <div id="empty">Open a carN.dat or drop it here (with its .pcx, for the texture and the colours), or start from the base car.<br>
+      Nothing is uploaded: it all stays in your browser.</div>
+    </div>
+    <aside id="panel"></aside>
+  </div>
+</section>
+<section id="textTab" hidden>
+  <p class="small">The car as text. A file opened and saved unchanged comes out byte for byte the same.</p>
   <textarea id="text" spellcheck="false" placeholder="Open a carN.dat, or drop it here."></textarea>
   <details class="small">
     <summary>The text</summary>
@@ -59,69 +129,7 @@ nop     end     data 0x.., 0x..     L123:   (a label)</pre>
     "visible" and "hidden" are the result of the last facing or nearer test. Everything after a #
     is a comment.</p>
   </details>
-</main>
-<script type="module">
-import { decode, encode } from './cartool.js';
-
-const $ = (id) => document.getElementById(id);
-let name = 'car1';
-
-function say(text, ok) {
-    $('message').textContent = text;
-    $('message').className = ok ? 'ok' : 'bad';
-}
-
-async function open(file) {
-    name = file.name.replace(/\.[^.]*$/, '');
-    const data = await file.arrayBuffer();
-    if (/\.txt$/i.test(file.name)) {
-        $('text').value = new TextDecoder().decode(data);
-        say(`${file.name} opened`, true);
-        return;
-    }
-    try {
-        $('text').value = decode(data);
-        say(`${file.name}: ${data.byteLength} bytes`, true);
-    } catch (e) {
-        say(`${file.name}: ${e.message}`);
-    }
-}
-
-function download(bytes, filename, type) {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([bytes], { type }));
-    a.download = filename;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-
-// the line of an error, selected in the text
-function showLine(line) {
-    const t = $('text'), lines = t.value.split('\n');
-    const start = lines.slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0);
-    t.focus();
-    t.setSelectionRange(start, start + (lines[line - 1] || '').length);
-}
-
-$('open').onchange = () => { if ($('open').files[0]) open($('open').files[0]); };
-$('saveDat').onclick = () => {
-    try {
-        const bytes = encode($('text').value);
-        download(bytes, name + '.dat', 'application/octet-stream');
-        say(`${name}.dat: ${bytes.length} bytes`, true);
-    } catch (e) {
-        say(e.message);
-        if (e.line)
-            showLine(e.line);
-    }
-};
-$('saveText').onclick = () => download($('text').value, name + '.txt', 'text/plain');
-addEventListener('dragover', (e) => e.preventDefault());
-addEventListener('drop', (e) => {
-    e.preventDefault();
-    if (e.dataTransfer.files[0])
-        open(e.dataTransfer.files[0]);
-});
-</script>
+</section>
+<script type="module" src="editor.js"></script>
 </body>
 </html>

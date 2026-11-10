@@ -289,8 +289,29 @@ uniform sampler2DArrayShadow uShadow;     // as três cascatas, uma por camada
 uniform vec3  uCascade;                   // fim da cascata 0, fim da 1, faixa de transição (mundo)
 uniform int   uCascadeOnlyFar;            // visão geral: só a cascata 2
 uniform float uShadowLight;               // luz na sombra (kShadowLight)
+uniform int   uDecalCount;                // discos projetados de cima (rzSetObjectDecals)
+uniform vec4  uDecal[4];                  // x, z (mundo), raio, alfa
+uniform vec3  uDecalColor[4];
 
 out vec4 fragColor;
+
+// Os discos projetados por cima da cor: o desenho dos checkpoints da página
+// (web/checkpoints.js): translúcido no meio, uma faixa da cor e a borda branca.
+vec3 decals(vec3 color) {
+    for (int i = 0; i < 4; ++i) {           // RZ_MAX_DECALS
+        if (i >= uDecalCount) break;
+        float r = length(vWorld.xz - uDecal[i].xy) / uDecal[i].z;
+        if (r > 1.02) continue;
+        const float aa = 0.02;                // sem derivadas dentro do laço
+        float band = smoothstep(0.78 - aa, 0.78 + aa, r);
+        float rim  = smoothstep(0.92 - aa, 0.92 + aa, r);
+        float edge = 1.0 - smoothstep(1.0 - aa, 1.0 + aa, r);
+        vec3  c = mix(mix(uDecalColor[i] * 0.7, uDecalColor[i], band), vec3(1.0), rim);
+        float a = mix(mix(0.22, 0.85, band), 0.90, rim) * edge * uDecal[i].w;
+        color = mix(color, c, a);
+    }
+    return color;
+}
 
 // Sombra: 1 iluminado, 0 na sombra. Fora da caixa de um mapa, ele não sombreia.
 // sampler2DArrayShadow com GL_LINEAR: PCF 2x2 do hardware. textureGrad com
@@ -369,7 +390,7 @@ void main() {
         texel = vColor.rgb;                                  // cor sólida: a mesma luz do texel
     }
     float lit = shadowTerm() * smoothstep(0.0, uShadowTerminator, vNdotL);
-    vec3 color = texel * mix(min(uShadowLight, vLight), vLight, lit);
+    vec3 color = decals(texel * mix(min(uShadowLight, vLight), vLight, lit));
     fragColor = vec4(mix(color, uFogColor, fog), 0.0);
 }
 `,

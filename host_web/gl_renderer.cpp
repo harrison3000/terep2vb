@@ -37,6 +37,7 @@ struct carrodef_s{
     int32_t id;
     int16_t n_points;
     uint16_t camera_pt;
+    uint16_t wheel_pt[4];       // hub vertex of each wheel, in rzSetObjectWheels' order
 };
 
 carrodef_s carros[5];
@@ -46,6 +47,7 @@ int currTgt = 0;
 // F1 0x01, F2 0x11.
 constexpr int CAM_UP = 0x10;
 static int cam_mode = RZ_CAMERA_FOLLOW;
+static bool free_cam = false;           // the page's free camera (gl_free_camera) instead of cam_mode
 static bool cam_internal() { return (cam_mode & 0x0f) == RZ_CAMERA_INTERNAL; }
 static CamFilter cam_filter;
 
@@ -136,6 +138,7 @@ static int canvas_width, canvas_height;    // for the text
 
 bool gl_start(int width, int height, int quality)
 {
+    free_cam = false;
     banner_color = 0;
     fog_changed = true;
     cam_mode = RZ_CAMERA_FOLLOW;            // the library's default
@@ -227,7 +230,8 @@ static void draw_texts()
 // the library's mode changes (not from F1 to F2 or back).
 static void set_camera(int c)
 {
-    rzSetCamera(ctx, c & 0x0f);
+    if (!free_cam)
+        rzSetCamera(ctx, c & 0x0f);
     if ((c & 0x0f) != (cam_mode & 0x0f))
         cam_filter.ready = false;
     cam_mode = c;
@@ -328,7 +332,9 @@ void gl_frame(float frames)
     if (fog_changed)
         apply_fog();
     // the field of view (FOV_*): the chase camera's by the speed of its vertex
-    if (cam_internal()) {
+    if (free_cam) {
+        fov_target = FOV_DEFAULT;
+    } else if (cam_internal()) {
         fov_target = FOV_INTERNAL;
     } else if (cam_mode == RZ_CAMERA_FOLLOW) {
         int ci = world.player_car[0];
@@ -352,6 +358,31 @@ void gl_frame(float frames)
     rzRender(ctx, frames);
 
     draw_texts();
+}
+
+void gl_free_camera(bool on, const float eye[3], const float forward[3])
+{
+    if (on) {
+        RzVertex e = { eye[0], eye[1], eye[2] }, f = { forward[0], forward[1], forward[2] };
+        rzSetCameraFree(ctx, &e, &f);
+        rzSetCamera(ctx, RZ_CAMERA_FREE);
+    } else if (free_cam) {
+        rzSetCamera(ctx, cam_mode & 0x0f);
+        cam_filter.ready = false;
+    }
+    free_cam = on;
+}
+
+void gl_set_decals(const RzDecal *decals, int count)
+{
+    rzSetObjectDecals(ctx, decals, count);
+}
+
+const float *gl_view()
+{
+    static float view[RZ_VIEW_FLOATS];
+    rzGetView(ctx, view);
+    return view;
 }
 
 void gl_stop()
@@ -390,7 +421,12 @@ static void updateCars(){
 
         // in theory the value should be 2, but it doesnt feel right
         // 1.4 doesnt feel right either, but who cares
-        float spd = F_8_24(car.wheel_speed[0]) * 1.4f;
+        float spd[4];
+        for (int w = 0; w < 4; w++) {
+            // the physics keeps a speed per vertex, and only for 0..3
+            uint16_t hub = carros[ci].wheel_pt[w];
+            spd[w] = hub < 4 ? F_8_24(car.wheel_speed[hub]) * 1.4f : 0.0f;
+        }
         rzSetObjectWheelSpin(ctx, id, spd);
 
         rzUpdateObjectVertices(ctx, id, ptrs);
@@ -519,6 +555,7 @@ static void loadCar(int i){
             auto p = car_get(i).points[pi];
 
             wee[widx].hubVertex = pi;
+            carros[i].wheel_pt[widx] = pi;
             wee[widx].front = p.wheel != 1;
             // radius: the point's against the ground (where the tyre touches), in
             // map units, 256 a tile: 2 * radius / 256, but over 127, a hair

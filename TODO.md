@@ -12,5 +12,8 @@
       rápido em 4x com ASan/UBSan, build com g++ e clang; CI no GitHub Actions.
 - [x] Corrigir o bug do pulo que corrompe o título (o carro procura o ponto mais baixo como
       num aperto novo). Os bugs do renderizador ficam como estão.
+- [ ] Câmera livre para o jogador no WebGL (hoje só no editor de checkpoints,
+      `editCheckpoints()`): refinar antes (controles, colisão com o terreno etc.) e dar
+      um jeito de entrar nela sem o console.
 
 Fora do escopo daqui: widescreen (só no renderizador novo).

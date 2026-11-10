@@ -269,7 +269,7 @@ static void update_spring(CarVertex &a, CarVertex &b, CarSpring &s)
     /* each square is at most 2^62, so the sum of three fits unsigned */
     uint64_t sq = (uint64_t)((int64_t)ahead.x * ahead.x) + (uint64_t)((int64_t)ahead.y * ahead.y)
                 + (uint64_t)((int64_t)ahead.z * ahead.z);
-    sq >>= 20;                          /* sqrt(x) >> 10 == sqrt(x >> 20), give or take */
+    sq >>= 20;                          /* floor(sqrt(x)) >> 10 == floor(sqrt(x >> 20)), exactly, for all intents and purposes */
     int32_t len = (int32_t)(sq < 0x80000000u ? isqrt32((uint32_t)sq) : isqrt64(sq));
 
     int32_t rest = s.rest, force;
