@@ -745,10 +745,10 @@ export function checkpointsBeforeFrame(ms) {
         const along = (held('KeyW') ? 1 : 0) - (held('KeyS') ? 1 : 0);
         const side = (held('KeyD') ? 1 : 0) - (held('KeyA') ? 1 : 0);
         const up = (held('KeyE', 'Space') ? 1 : 0) - (held('KeyQ', 'KeyC') ? 1 : 0);
-        const f = forward(), c = Math.cos(ed.yaw), s = Math.sin(ed.yaw);
-        ed.eye[0] += (f[0] * along - s * side) * speed;
-        ed.eye[1] += (f[1] * along + c * side) * speed;
-        ed.eye[2] += (f[2] * along + up) * speed;
+        const c = Math.cos(ed.yaw), s = Math.sin(ed.yaw);   // W A S D on the level, where the camera turns
+        ed.eye[0] += (c * along - s * side) * speed;
+        ed.eye[1] += (s * along + c * side) * speed;
+        ed.eye[2] += up * speed;
     }
     ed.eye[0] = Math.max(-100, Math.min(355, ed.eye[0]));
     ed.eye[1] = Math.max(-100, Math.min(355, ed.eye[1]));
@@ -1030,7 +1030,7 @@ function buildPanel() {
     panel.innerHTML = `
       <b>Checkpoints</b> <span class="cpName"></span>
       <p class="small">Click the picture to look with the mouse (Esc frees it).
-      W A S D fly, E / Space up, Q / C down, Shift faster, arrows turn.
+      W A S D fly on the level, E / Space up, Q / C down, Shift faster, arrows turn.
       Click or Enter: a checkpoint where the cross is (the next number);
       B or Shift+click: a fork (one more of the last number). On one: F fork or not,
       + / − its number, X / Delete removes it; [ ] or the wheel: its diameter
