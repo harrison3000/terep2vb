@@ -317,9 +317,35 @@ function questionTexture(gl) {
 // question marks and flags ({ kind, x, y }), rings of fire ({ kind, x, y,
 // z, angle, d }); arrows, question marks and flags at h over the ground
 // (FLOAT_HEIGHT without it).
+// The vertices of a disc of diameter d (Markers.set)
+const discVertices = (d) => Math.max(2, Math.ceil((d / 2 + 0.05) / STEP)) * SEGMENTS * 6;
+
+// Another Markers (shared) can lend its program and texture: only the
+// buffer is its own.  vertices: how many to make room for at first (set
+// grows it if needs be).
 class Markers {
-    constructor(gl) {
+    constructor(gl, vertices, shared = null) {
         this.gl = gl;
+        this.scratch = new Float32Array(FLOATS * vertices);    // set's vertices
+        this.shapes = [];           // the shapes set, each with its vertices: first, count
+        this.vao = gl.createVertexArray();
+        this.buffer = gl.createBuffer();
+        gl.bindVertexArray(this.vao);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
+        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, FLOATS * 4, 0);
+        gl.vertexAttribPointer(1, 2, gl.FLOAT, false, FLOATS * 4, 12);
+        gl.vertexAttribPointer(2, 1, gl.FLOAT, false, FLOATS * 4, 20);
+        gl.enableVertexAttribArray(0);
+        gl.enableVertexAttribArray(1);
+        gl.enableVertexAttribArray(2);
+        gl.bindVertexArray(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        if (shared) {
+            this.program = shared.program;
+            this.u = shared.u;
+            this.question = shared.question;
+            return;
+        }
         const shader = (type, text) => {
             const s = gl.createShader(type);
             gl.shaderSource(s, text);
@@ -338,40 +364,39 @@ class Markers {
         for (const name of ['uViewProj', 'uShift', 'uSize', 'uRight', 'uUp', 'uKind', 'uRadius', 'uHeight', 'uTime',
                             'uColor', 'uAlpha', 'uQuestion', 'uFogOn', 'uFogStart', 'uFogEnd', 'uFogOrigin', 'uFogColor'])
             this.u[name] = gl.getUniformLocation(p, name);
-        this.vao = gl.createVertexArray();
-        this.buffer = gl.createBuffer();
-        gl.bindVertexArray(this.vao);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, FLOATS * 4, 0);
-        gl.vertexAttribPointer(1, 2, gl.FLOAT, false, FLOATS * 4, 12);
-        gl.vertexAttribPointer(2, 1, gl.FLOAT, false, FLOATS * 4, 20);
-        gl.enableVertexAttribArray(0);
-        gl.enableVertexAttribArray(1);
-        gl.enableVertexAttribArray(2);
-        gl.bindVertexArray(null);
-        gl.bindBuffer(gl.ARRAY_BUFFER, null);
         this.question = questionTexture(gl);
-        this.shapes = [];           // the shapes set, each with its vertices: first, count
     }
 
     // The shapes into the buffer, on the ground (heights).
     set(shapes, heights) {
-        const out = [];
+        let out = this.scratch, n = 0;                  // n floats written
+        const put = (v) => {                            // a vertex (FLOATS floats)
+            if (n + FLOATS > out.length) {
+                const bigger = new Float32Array(out.length * 2);
+                bigger.set(out);
+                out = this.scratch = bigger;
+            }
+            out.set(v, n);
+            n += FLOATS;
+        };
         const ground = (x, y) => groundHeight(heights, x, y);
-        const quad = (a, b, c, e) => out.push(...a, ...b, ...c, ...a, ...c, ...e);
+        const quad = (a, b, c, e) => { put(a); put(b); put(c); put(a); put(c); put(e); };
         // a billboard's four corners at the foot (x, h, y): the shader turns them to the camera
         const billboard = (x, h, y, seed) =>
             quad([x, h, y, -1, -1, seed], [x, h, y, 1, -1, seed], [x, h, y, 1, 1, seed], [x, h, y, -1, 1, seed]);
         this.shapes = shapes.map((shape) => {
             let s = shape;
-            const first = out.length / FLOATS;
-            if (s.kind === KIND_DISC) {         // ring by ring, on the ground at each vertex
+            const first = n / FLOATS;
+            if (s.kind === KIND_DISC) {         // ring by ring, on the ground at each vertex (each once)
                 const r = s.d / 2 + 0.05, rings = Math.max(2, Math.ceil(r / STEP));   // a little more: the edge's smoothing
-                const at = (ring, seg) => {
-                    const a = seg / SEGMENTS * 2 * Math.PI, rr = ring / rings * r;
-                    const lx = Math.cos(a) * rr, ly = Math.sin(a) * rr;
-                    return [s.x + lx, ground(s.x + lx, s.y + ly) + LIFT, s.y + ly, lx, ly, 0];
-                };
+                const grid = [];
+                for (let ring = 0; ring <= rings; ring++)
+                    for (let seg = 0; seg <= SEGMENTS; seg++) {
+                        const a = seg / SEGMENTS * 2 * Math.PI, rr = ring / rings * r;
+                        const lx = Math.cos(a) * rr, ly = Math.sin(a) * rr;
+                        grid.push([s.x + lx, ground(s.x + lx, s.y + ly) + LIFT, s.y + ly, lx, ly, 0]);
+                    }
+                const at = (ring, seg) => grid[ring * (SEGMENTS + 1) + seg];
                 for (let ring = 0; ring < rings; ring++)
                     for (let seg = 0; seg < SEGMENTS; seg++)
                         quad(at(ring, seg), at(ring + 1, seg), at(ring + 1, seg + 1), at(ring, seg + 1));
@@ -398,8 +423,8 @@ class Markers {
                 };
                 const half = ARROW_THICKNESS / 2;
                 for (const tri of ARROW_TOP) {
-                    for (const i of tri) out.push(...at(ARROW_OUTLINE[i], half, 1));
-                    for (const i of tri) out.push(...at(ARROW_OUTLINE[i], -half, 0.85));
+                    for (const i of tri) put(at(ARROW_OUTLINE[i], half, 1));
+                    for (const i of tri) put(at(ARROW_OUTLINE[i], -half, 0.85));
                 }
                 ARROW_OUTLINE.forEach((p, i) => {
                     const q = ARROW_OUTLINE[(i + 1) % ARROW_OUTLINE.length];
@@ -424,11 +449,11 @@ class Markers {
                     billboard(x, ground(x, y), y, (i * 0.618034) % 1);
                 }
             }
-            return { ...s, first, count: out.length / FLOATS - first };
+            return { ...s, first, count: n / FLOATS - first };
         });
         const gl = this.gl;
         gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(out), gl.DYNAMIC_DRAW);
+        gl.bufferData(gl.ARRAY_BUFFER, out, gl.DYNAMIC_DRAW, 0, n);
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
     }
 
@@ -516,6 +541,7 @@ const TURN = 0.0025;                // radians a pixel of the mouse
 const KEY_TURN = 1.6;               // radians a second with the arrows
 
 let wasm = null, glCanvas = null, markers = null;
+let previewMarkers = null;          // the editor's preview, apart: it moves every frame
 let mapName = 'checkpoints';
 let data = parseCheckpoints(EMPTY);
 let heights = null;                 // the map's, a copy (from the module's memory, which can grow)
@@ -540,7 +566,9 @@ export function startCheckpoints(module, canvas, name, text) {
     const p = wasm.web_heightmap();
     heights = new Uint8Array(wasm.memory.buffer, p, 256 * 256).slice();
     try {
-        markers ??= new Markers(canvas.getContext('webgl2'));
+        // room for 30 checkpoints of 5 tiles in the editor; the preview, one
+        markers ??= new Markers(canvas.getContext('webgl2'), 30 * discVertices(5));
+        previewMarkers ??= new Markers(canvas.getContext('webgl2'), discVertices(DEFAULT_DIAMETER * 2), markers);
     } catch (e) {
         console.error(e);
         markers = null;
@@ -798,6 +826,7 @@ function ringHit(eye, dir, p) {
 // drawn over it (in the editor all of them, the one aimed at blinking, and
 // where a new one would go).
 let shown = null;                   // the shapes in the buffer, and their styles
+let edShapes = [];                  // the editor's, in the buffer
 let decalMemory = 0;                // RZ_MAX_DECALS RzDecal in the module's memory
 
 // The discs among shapes (styles: theirs) projected on the cars too, from
@@ -834,21 +863,26 @@ export function checkpointsAfterFrame() {
         projectDiscs(shown.shapes, shown.styles, view);
         return;
     }
-    const shapes = data.points.map((p) => (p.fire ? fireShape(p) : { kind: KIND_DISC, x: p.x, y: p.y, d: p.d }));
-    const preview = ed.aim && ed.aimed < 0;
-    if (preview)
-        shapes.push({ kind: KIND_DISC, x: ed.aim[0], y: ed.aim[1], d: ed.diameter });
-    markers.set(shapes, heights);               // every frame: the preview moves with the aim
-    dirty = true;                               // (and after the editor, the race's again)
+    if (dirty) {                                // the checkpoints: made again only when they change
+        edShapes = data.points.map((p) => (p.fire ? fireShape(p) : { kind: KIND_DISC, x: p.x, y: p.y, d: p.d }));
+        markers.set(edShapes, heights);
+        dirty = false;
+    }
     const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 150);
     const styles = data.points.map((p, i) => ({
         color: i === ed.aimed ? COLORS.aimed : p.fork ? COLORS.fork : COLORS.normal,
         alpha: i === ed.aimed ? pulse : 1,
     }));
-    if (preview)
-        styles.push({ color: COLORS.preview, alpha: 0.5 });
     markers.draw(view, styles);
-    projectDiscs(shapes, styles, view);
+    if (ed.aim && ed.aimed < 0) {               // the preview, every frame: it moves with the aim
+        const shape = { kind: KIND_DISC, x: ed.aim[0], y: ed.aim[1], d: ed.diameter };
+        const style = { color: COLORS.preview, alpha: 0.5 };
+        previewMarkers.set([shape], heights);
+        previewMarkers.draw(view, [style]);
+        projectDiscs([...edShapes, shape], [...styles, style], view);
+    } else {
+        projectDiscs(edShapes, styles, view);
+    }
 }
 
 // The race's lap, checkpoint and time at the top right, on the text's canvas
@@ -1121,6 +1155,7 @@ function openEditor() {
     }
     ed.keys.clear();
     ed.on = true;
+    dirty = true;                               // the buffer: the editor's shapes
     wasm.web_pause(1);
     addEventListener('pointerdown', onPointerDown);
     addEventListener('mousemove', onMouseMove);
