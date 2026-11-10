@@ -106,6 +106,11 @@ const uint8_t *web_file(const char *name, int32_t *size)
     return f ? f->data : nullptr;
 }
 
+bool web_paused()
+{
+    return paused;
+}
+
 void web_text(float x, float y, float size, const uint8_t *rgb, const char *text)
 {
     texts.push_back({ x, y, size, (uint32_t)rgb[0] << 16 | (uint32_t)rgb[1] << 8 | rgb[2], text });
@@ -205,6 +210,25 @@ EXPORT("web_canvas_size") void web_canvas_size(int w, int h)
     canvas_h = h < 1 ? 1 : h;
     if (running && opengl)
         gl_resize(canvas_w, canvas_h);
+}
+
+// One physics tick now, paused or not (the page's single step, physics
+// frozen for screenshots); the picture follows at the next frame.
+EXPORT("web_step") void web_step()
+{
+    if (!running)
+        return;
+    physics_tick();
+    ticks++;
+    if (opengl)
+        gl_tick();
+}
+
+// The software renderer's scale during a game (the pause menu): 1..MAX_RENDER_SCALE.
+EXPORT("web_set_scale") void web_set_scale(int scale)
+{
+    if (running && !opengl)
+        game_set_scale(scale < 1 ? 1 : scale > MAX_RENDER_SCALE ? MAX_RENDER_SCALE : scale);
 }
 
 // The OpenGL renderer's draw distance (DRAW_DISTANCE_MIN..MAX tiles): any time.

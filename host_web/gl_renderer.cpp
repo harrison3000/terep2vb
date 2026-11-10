@@ -445,7 +445,7 @@ static void updateCars(){
         for (int w = 0; w < 4; w++) {
             // the physics keeps a speed per vertex, and only for 0..3
             uint16_t hub = carros[ci].wheel_pt[w];
-            spd[w] = hub < 4 ? F_8_24(car.wheel_speed[hub]) * 1.4f : 0.0f;
+            spd[w] = hub < 4 && !web_paused() ? F_8_24(car.wheel_speed[hub]) * 1.4f : 0.0f;   // paused: still
         }
         rzSetObjectWheelSpin(ctx, id, spd);
 

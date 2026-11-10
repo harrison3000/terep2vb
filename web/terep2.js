@@ -4,7 +4,7 @@
 import { webglImports } from './webgl.js';
 import { baseName, openAnniversary, trackFiles, trackTitle } from './anniversary.js';
 import { decodeCar, decodePcx, drawCar, drawPcx } from './preview.js';
-import { checkpointsAfterFrame, checkpointsBeforeFrame, checkpointsKey, checkpointsMinimap, checkpointsOverlay, checkpointsOverlayOn,
+import { checkpointsAfterFrame, checkpointsBeforeFrame, checkpointsKey, checkpointsMinimap, checkpointsOverlay, checkpointsOverlayOn, editingCheckpoints,
          startCheckpoints, stopCheckpoints } from './checkpoints.js';
 
 const $ = (id) => document.getElementById(id);
@@ -495,6 +495,9 @@ async function loadGame(files, name, withCheckpoints) {
 
 function stop() {
     playing = false;
+    frozen = false;
+    if (paused)
+        setPaused(false);
     stopCheckpoints();
     wasm.web_stop();
     if (webgl) {                        // the canvas keeps its last frame: not to be seen in the next game
@@ -583,9 +586,11 @@ function frame(now) {
     }
     if (webgl)
         checkpointsBeforeFrame(now - last);
+    wasm.web_pause(physicsStopped() ? 1 : 0);     // the editor lets it go on closing: frozen keeps it
     const drawn = wasm.web_advance(now - last);
     last = now;
-    playSamples();
+    if (!paused)
+        playSamples();
     if (drawn && webgl) {
         checkpointsAfterFrame();
         const overlay = checkpointsOverlayOn();
@@ -626,20 +631,75 @@ function frame(now) {
 }
 
 function key(e, up) {
-    if (!playing || checkpointsKey(e, up))
+    if (!playing)
+        return;
+    if (frozen && !paused && !editingCheckpoints() && e.code === 'Space') {   // one physics step
+        if (!up)
+            wasm.web_step();
+        e.preventDefault();
+        return;
+    }
+    if (!paused && checkpointsKey(e, up))
         return;
     if (e.code === 'Escape') {
-        if (!up)
-            stop();
+        if (!up && !e.repeat)
+            setPaused(!paused);
         e.preventDefault();
         return;
     }
     const sc = SCANCODES[e.code];
-    if (sc === undefined)
+    if (sc === undefined || (paused && !up))     // paused: only the releases (no key stuck down)
         return;
     e.preventDefault();             // Tab, F1..F10, the arrows: not the browser's
     wasm.web_key(up ? sc | 0x80 : sc);
 }
+
+// Esc's pause menu, as the SDL host's: the physics stopped (the picture goes
+// on), the sound quiet, the render scale (software renderer) or the draw
+// distance (OpenGL) and the minimap, which are also the page's options.
+// Frozen (its option, OpenGL): the physics stays stopped after the menu, for
+// screenshots; Space makes one step.
+let paused = false, frozen = false;
+
+// The physics stopped: by the menu, frozen, or by the checkpoint editor.
+const physicsStopped = () => paused || frozen || editingCheckpoints();
+
+function setPaused(on) {
+    paused = on;
+    wasm.web_pause(physicsStopped() ? 1 : 0);
+    $('pause').hidden = !on;
+    if (on) {
+        $('pauseScale').value = $('scale').value;
+        $('pauseDistance').value = $('distance').value;
+        $('pauseDistanceText').textContent = $('distance').value + ' tiles';
+        $('pauseMinimap').checked = $('minimapOn').checked;
+        $('pauseFreeze').checked = frozen;
+        if (player)                     // what was queued: not to be heard on resuming
+            player.port.postMessage(null);
+        audio?.suspend();
+    } else if (audio && $('sound').checked) {
+        audio.resume();
+    }
+}
+$('pauseScale').onchange = () => {
+    $('scale').value = $('pauseScale').value;
+    wasm.web_set_scale(+$('pauseScale').value);
+    savePrefs();
+};
+$('pauseDistance').oninput = () => {
+    $('distance').value = $('pauseDistance').value;
+    $('distance').oninput();
+    $('pauseDistanceText').textContent = $('distance').value + ' tiles';
+    wasm.web_draw_distance(+$('distance').value);
+    savePrefs();
+};
+$('pauseMinimap').onchange = () => {
+    $('minimapOn').checked = $('pauseMinimap').checked;
+    savePrefs();
+};
+$('pauseFreeze').onchange = () => { frozen = webgl && $('pauseFreeze').checked; };
+$('resume').onclick = () => setPaused(false);
+$('quit').onclick = () => stop();
 
 function savePrefs() {
     try {
@@ -703,7 +763,7 @@ if (touchScreen) {
         camera = (camera + 1) % 5;
         wasm.web_key(0x3b + camera);
     }, () => wasm.web_key((0x3b + camera) | 0x80));
-    $('back').addEventListener('click', () => { if (playing) stop(); });
+    $('back').addEventListener('click', () => { if (playing) setPaused(!paused); });
 }
 
 // Full screen on a touch screen (on a computer there is F11), where the

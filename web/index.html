@@ -23,6 +23,12 @@
   #screen { image-rendering: pixelated; }
   #gl, #overlay { position: fixed; inset: 0; width: 100vw; height: 100vh; }
   #minimap { position: fixed; right: 2vmin; bottom: 2vmin; }
+  /* Esc's pause menu (terep2.js) */
+  #pause { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 20;
+    min-width: min(20em, calc(100vw - 32px)); padding: 12px 16px; background: #000d; border-radius: 6px; }
+  #pause h2 { margin: 0 0 8px; font-size: 1.2em; }
+  #pause label { display: block; margin: 6px 0; }
+  #pause button { margin: 8px 8px 0 0; padding: 6px 14px; font: inherit; cursor: pointer; }
   /* The checkpoint editor (checkpoints.js, editCheckpoints() in the console) */
   #checkpointEditor { position: fixed; top: 8px; right: 8px; z-index: 10; width: min(24em, calc(100vw - 32px));
     max-height: calc(100vh - 32px); overflow: auto; padding: 8px; background: #000c; border-radius: 6px; }
@@ -109,12 +115,24 @@
   <p id="status" class="small"></p>
   <p class="small">Keys: arrows + keypad 5 drive car 1 (W Z A D S car 2...), 1 / 2 jump, F1–F5 cameras,
   F6 second view's camera (with WebGL: a free camera, W A S D, E / Space, Q, the mouse after a click), F9 split screen, F10 fog, Tab / Q change car, [ ] gravity.
-  Esc goes back here (on a touch screen: the buttons on the screen drive car 1, ✕ goes back). With OpenGL: keypad + − / * move the chase camera; the render scale and the
+  Esc pauses, with a menu that also goes back here (on a touch screen: the buttons on the screen drive car 1, ✕ pauses). With OpenGL: keypad + − / * move the chase camera; the render scale and the
   split screen are the software renderer's; the draw distance is OpenGL's.</p>
   <p class="small"><a href="car_editor/">Car editor</a>: a car file (carN.dat), to edit in 3D or as text and save again.</p>
 </div>
 <div id="game" hidden><canvas id="screen"></canvas><canvas id="gl"></canvas><canvas id="overlay"></canvas>
   <canvas id="minimap"></canvas>
+  <div id="pause" hidden>
+    <h2>Paused</h2>
+    <label class="sw-only">Render scale <select id="pauseScale">
+      <option value="1">1x (the original)</option><option value="2">2x</option>
+      <option value="3">3x</option><option value="4">4x</option>
+    </select></label>
+    <label class="gl-only">Draw distance <input type="range" id="pauseDistance" min="1" max="110">
+      <span id="pauseDistanceText"></span></label>
+    <label><input type="checkbox" id="pauseMinimap"> Minimap</label>
+    <label class="gl-only"><input type="checkbox" id="pauseFreeze"> Pause physics (photo mode; Space: one step)</label>
+    <button id="resume">Resume (Esc)</button><button id="quit">Back to the maps</button>
+  </div>
   <div id="touch" hidden>
     <button class="left" data-sc="75" aria-label="Left">◀</button>
     <button class="right" data-sc="77" aria-label="Right">▶</button>

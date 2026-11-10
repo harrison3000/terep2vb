@@ -7,6 +7,8 @@
 // web_main.cpp: a file of the map, by its name (any case), in memory; null
 // if it is not there
 const uint8_t *web_file(const char *name, int32_t *size);
+// web_main.cpp: whether the physics is stopped (web_pause)
+bool web_paused();
 // web_main.cpp: a text the page draws over the canvas this frame, its top left
 // corner at (x, y) in canvas pixels, size the font's
 void web_text(float x, float y, float size, const uint8_t *rgb, const char *text);

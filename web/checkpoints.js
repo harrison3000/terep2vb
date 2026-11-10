@@ -1142,7 +1142,7 @@ function buildPanel() {
 // The mouse on the picture: pointer lock to look around; then clicks place
 // and remove, the wheel changes diameters.
 function onPointerDown(e) {
-    if (!flying() || e.target.closest('#checkpointEditor'))
+    if (!flying() || e.target.closest('#checkpointEditor, #pause'))     // the panels: their own clicks
         return;
     e.preventDefault();                          // (which also keeps the focus where it is)
     if (document.activeElement === ed.text)
