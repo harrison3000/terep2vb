@@ -19,7 +19,7 @@ struct PendingProgram {
     const char* fragmentName;
     GLuint program, vs, fs;
 };
-constexpr int32_t kMaxPending = 8;
+constexpr int32_t kMaxPending = 9;
 PendingProgram g_pending[kMaxPending];      // um contexto por vez
 int32_t g_pendingCount = 0;
 char g_defines[64];                         // os #defines do contexto em criação
@@ -76,7 +76,7 @@ void startPrograms(const RzContext* ctx) {
         { "terrain.vert", "terrain.frag" }, { "object.vert", "object.frag" },
         { "depth.vert", "depth.frag" },     { "object_depth.vert", "depth.frag" },
         { "wall.vert", "wall.frag" },       { "glass.vert", "glass.frag" },
-        { "sprite.vert", "sprite.frag" },
+        { "sprite.vert", "sprite.frag" },   { "sky.vert", "sky.frag" },
     };
     g_pendingCount = 0;
     for (const auto& names : kPrograms) g_pending[g_pendingCount++] = startProgram(names[0], names[1]);
@@ -194,6 +194,7 @@ bool createRenderer(RzContext* ctx) {
     if (!createBorder(ctx)) return false;
     if (!createGlassProgram(ctx)) return false;
     if (!createSprites(ctx)) return false;
+    if (!createSky(ctx)) return false;
 
     // Malha do terreno: buffer de tamanho fixo, preenchido em buildTerrainMesh
     glGenVertexArrays(1, &ctx->terrainVao);
@@ -226,6 +227,7 @@ void destroyRenderer(RzContext* ctx) {
     destroyBorder(ctx);
     if (ctx->glassProgram.program) glDeleteProgram(ctx->glassProgram.program);
     destroySprites(ctx);
+    destroySky(ctx);
 }
 
 void renderFrame(RzContext* ctx) {
@@ -240,6 +242,7 @@ void renderFrame(RzContext* ctx) {
     glViewport(0, 0, ctx->width, ctx->height);
     glClearColor(ctx->backgroundR, ctx->backgroundG, ctx->backgroundB, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    drawSky(ctx);                                 // atrás de tudo: sol ou lua, nuvens
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
     glFrontFace(GL_CCW);                          // frente = anti-horário na tela (como no software)

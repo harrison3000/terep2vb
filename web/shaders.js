@@ -583,6 +583,70 @@ void main() {
 // Parede de limite (rz_border.cpp): semitransparente, com X vermelhos de
 // uXSize tiles; só perto do alvo (fade entre uFadeFar e uFadeNear, distância
 // horizontal do alvo ao ponto da parede); com neblina.
+// Céu (rz_sky.cpp): um triângulo que cobre a tela; o raio de cada pixel sai
+// da base da câmera e das focais. Base: a cor de fundo (a da neblina, que
+// emenda no horizonte); o sol (fundo claro) ou a lua (escuro) na direção da
+// luz; nuvens discretas num plano alto, em células, sumindo no horizonte.
+'sky.vert': `out vec2 vNdc;
+void main() {
+    vec2 p = vec2(gl_VertexID == 1 ? 3.0 : -1.0, gl_VertexID == 2 ? 3.0 : -1.0);
+    vNdc = p;
+    gl_Position = vec4(p, 1.0, 1.0);
+}
+`,
+'sky.frag': `precision highp float;
+precision highp int;
+in vec2 vNdc;
+uniform vec3  uRight, uUp, uForward;      // a câmera (mundo, y para cima)
+uniform vec3  uFocal;                     // focalX, focalY
+uniform vec3  uLight;                     // direção para a luz
+uniform vec3  uColor;                     // cor de fundo
+uniform float uTime;                      // segundos
+out vec4 fragColor;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+void main() {
+    vec3 dir = normalize(uForward + uRight * (vNdc.x / uFocal.x) + uUp * (vNdc.y / uFocal.y));
+    vec3 color = uColor;
+    float day = step(0.45, dot(uColor, vec3(0.299, 0.587, 0.114)));   // fundo claro: dia
+
+    // sol: um clarão (sem disco); lua: 32 x 32 pixels, pálida, com crateras,
+    // 70% iluminada (crescente gibosa: o terminador é uma meia elipse)
+    float d = max(dot(dir, uLight), 0.0);
+    if (day > 0.5) {
+        float glare = pow(d, 6.0) * 0.18 + pow(d, 60.0) * 0.45 + pow(d, 800.0) * 1.2;
+        color = mix(color, vec3(1.0, 0.97, 0.88), clamp(glare, 0.0, 1.0));
+    } else if (d > 0.9) {
+        vec3 side = normalize(cross(uLight, vec3(0.0, 1.0, 0.0)));
+        vec3 top = cross(side, uLight);
+        vec2 m = vec2(dot(dir, side), dot(dir, top)) / 0.05;   // raio da lua: 0,05 rad
+        vec2 cell = floor(m * 16.0);                           // 32 x 32 no disco
+        vec2 q = (cell + 0.5) / 16.0;
+        if (length(q) < 1.0) {
+            float crater = step(0.75, hash(floor(cell / 2.0) + 3.0)) * 0.16 + noise(q * 4.0) * 0.12;
+            // iluminada onde x > -0,4 sqrt(1 - y²): metade + 0,4 da outra metade = 70%
+            float lit = step(-0.4 * sqrt(max(1.0 - q.y * q.y, 0.0)), q.x);
+            color = mix(color, vec3(0.86, 0.88, 0.92) * (1.0 - crater), 0.12 + 0.88 * lit);
+        }
+    }
+
+    // nuvens: plano alto, em células (levemente pixelizadas), andando devagar
+    if (dir.y > 0.0) {
+        vec2 uv = dir.xz / max(dir.y, 0.05) * 3.0 + vec2(uTime * 0.03, uTime * 0.01);
+        uv = floor(uv * 12.0) / 12.0;
+        float n = noise(uv) * 0.6 + noise(uv * 2.1 + 7.0) * 0.3 + noise(uv * 4.3 + 13.0) * 0.1;
+        float cloud = smoothstep(0.55, 0.8, n) * smoothstep(0.03, 0.3, dir.y);
+        vec3 tint = day > 0.5 ? vec3(1.0) : uColor + vec3(0.12);
+        color = mix(color, tint, cloud * (day > 0.5 ? 0.45 : 0.35));
+    }
+    fragColor = vec4(color, 0.0);
+}
+`,
+
 'wall.vert': `layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec2 aUV;          // tiles ao longo da parede / acima da base
 uniform mat4 uViewProj;

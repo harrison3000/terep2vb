@@ -441,6 +441,11 @@ struct GlassProgram {
     FogUniforms    fog;
 };
 
+struct SkyProgram {
+    GLuint program = 0;
+    GLint  right = -1, up = -1, forward = -1, focal = -1, light = -1, color = -1, time = -1;
+};
+
 struct WallProgram {
     GLuint program = 0;
     GLint  viewProj = -1, target = -1, fadeNear = -1, fadeFar = -1, xSize = -1, cellSize = -1;
@@ -505,6 +510,8 @@ struct RzContext {
     rz::DepthProgram   depthProgram;
     rz::DepthProgram   objectDepthProgram;   // sombra dos objetos (posição do bloco)
     rz::WallProgram    wallProgram;
+    rz::SkyProgram     skyProgram;
+    rz::GLuint         skyVao = 0;
     rz::GlassProgram   glassProgram;
     rz::SpriteProgram  spriteProgram;
 
@@ -743,6 +750,11 @@ void freeGlass(Object& o);
 void drawGlass(RzContext* ctx, const Mat4& viewProj);
 
 // rz_sprites.cpp
+// rz_sky.cpp
+bool createSky(RzContext* ctx);
+void destroySky(RzContext* ctx);
+void drawSky(const RzContext* ctx);
+
 bool createSprites(RzContext* ctx);
 void destroySprites(RzContext* ctx);
 void setSpritePalette(RzContext* ctx, const uint8_t* paletteRGB);   // nullptr: rampa de cinza
