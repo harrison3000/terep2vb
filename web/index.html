@@ -29,7 +29,7 @@
   #pause h2 { margin: 0 0 8px; font-size: 1.2em; }
   #pause label { display: block; margin: 6px 0; }
   #pause button { margin: 8px 8px 0 0; padding: 6px 14px; font: inherit; cursor: pointer; }
-  /* The checkpoint editor (checkpoints.js, editCheckpoints() in the console) */
+  /* The checkpoint editor (checkpoints.js, from the pause menu) */
   #checkpointEditor { position: fixed; top: 8px; right: 8px; z-index: 10; width: min(24em, calc(100vw - 32px));
     max-height: calc(100vh - 32px); overflow: auto; padding: 8px; background: #000c; border-radius: 6px; }
   #checkpointEditor p { margin: 6px 0; }
@@ -131,7 +131,8 @@
       <span id="pauseDistanceText"></span></label>
     <label><input type="checkbox" id="pauseMinimap"> Minimap</label>
     <label class="gl-only"><input type="checkbox" id="pauseFreeze"> Pause physics (photo mode; Space: one step)</label>
-    <button id="resume">Resume (Esc)</button><button id="quit">Back to the maps</button>
+    <button id="editCheckpoints" class="gl-only">Checkpoint editor</button><br class="gl-only">
+    <button id="resume">Resume (Esc)</button><button id="quit">Exit game</button>
   </div>
   <div id="touch" hidden>
     <button class="left" data-sc="75" aria-label="Left">◀</button>

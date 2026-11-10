@@ -2,8 +2,8 @@
 // to their text file, raced through (the next ones and the ones after them
 // drawn over the renderer's frame, in its WebGL context, with its depth
 // buffer, after rzRender; the lap, the time over the text's canvas), and
-// made in the editor, a free camera flying over the map (editCheckpoints()
-// in the console), which shows them all.  The same free camera, without the
+// made in the editor, a free camera flying over the map (from the pause
+// menu), which shows them all.  The same free camera, without the
 // editor, is the game's F6 (with the OpenGL renderer).
 //
 // The file:
@@ -1049,15 +1049,19 @@ function editKey(e, up) {
     }
 }
 
-// The aimed checkpoint, or the new ones, half a tile bigger or smaller.
+// The aimed checkpoint, or the new ones, half a tile bigger or smaller: up to
+// MAX_DIAMETER here (bigger ones, from the text, stay as they are until made
+// smaller).
+const MAX_DIAMETER = 50;            // tiles: a radius of 25
+const resized = (d, sign) => (sign > 0 ? Math.max(d, Math.min(MAX_DIAMETER, d + 0.5)) : Math.max(0.5, d - 0.5));
 function resize(sign) {
     const a = ed.aimed >= 0 ? data.points[ed.aimed] : null;
     if (a) {
-        a.d = Math.max(0.5, a.d + sign * 0.5);
-        ed.diameter = a.d;
+        a.d = resized(a.d, sign);
+        ed.diameter = Math.min(a.d, MAX_DIAMETER);
         changed();
     } else {
-        ed.diameter = Math.max(0.5, ed.diameter + sign * 0.5);
+        ed.diameter = resized(ed.diameter, sign);
         showStatus();
     }
 }
@@ -1211,7 +1215,6 @@ function stopFreeCamera() {
 
 function openEditor() {
     if (!wasm || !markers) {
-        console.log('editCheckpoints(): only in a game with the WebGL renderer');
         return false;
     }
     if (ed.free)
@@ -1253,6 +1256,5 @@ function closeEditor() {
     }
 }
 
-// In the console: opens the editor in the game being played (WebGL), or
-// closes it.
-globalThis.editCheckpoints = () => (ed.on ? (closeEditor(), false) : openEditor());
+// The pause menu's button: the editor in the game being played (WebGL).
+export const openCheckpointEditor = () => ed.on || openEditor();

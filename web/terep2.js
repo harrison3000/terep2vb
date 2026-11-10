@@ -5,6 +5,7 @@ import { webglImports } from './webgl.js';
 import { baseName, openAnniversary, trackFiles, trackTitle } from './anniversary.js';
 import { decodeCar, decodePcx, drawCar, drawPcx } from './preview.js';
 import { checkpointsAfterFrame, checkpointsBeforeFrame, checkpointsKey, checkpointsMinimap, checkpointsOverlay, checkpointsOverlayOn, editingCheckpoints,
+         openCheckpointEditor,
          startCheckpoints, stopCheckpoints } from './checkpoints.js';
 
 const $ = (id) => document.getElementById(id);
@@ -699,6 +700,10 @@ $('pauseMinimap').onchange = () => {
 };
 $('pauseFreeze').onchange = () => { frozen = webgl && $('pauseFreeze').checked; };
 $('resume').onclick = () => setPaused(false);
+$('editCheckpoints').onclick = () => {
+    setPaused(false);
+    openCheckpointEditor();         // which stops the physics itself
+};
 $('quit').onclick = () => stop();
 
 function savePrefs() {
