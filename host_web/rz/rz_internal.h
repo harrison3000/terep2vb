@@ -63,6 +63,7 @@ constexpr float kFollowLookY        = 0.1f;
 // alvo anda dentro dela, o olhar não muda. A posição (corda) segue normal.
 constexpr float kCameraBubbleRadius  = 0.3f;    // tiles
 constexpr float kInternalNear        = 0.02f;   // câmera interna: near plane (tiles)
+constexpr float kFreeNear            = 0.05f;   // câmera livre: near plane no máximo (tiles; até 0,1 do chão)
 constexpr float kInternalEnterFrames = 30.0f;   // perseguição -> interna: voo suave (frames)
 
 // Troca de alvo da câmera (rzSetCameraTarget com outro objeto): em vez de

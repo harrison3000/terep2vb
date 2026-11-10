@@ -3,7 +3,8 @@
 // drawn over the renderer's frame, in its WebGL context, with its depth
 // buffer, after rzRender; the lap, the time over the text's canvas), and
 // made in the editor, a free camera flying over the map (editCheckpoints()
-// in the console), which shows them all.
+// in the console), which shows them all.  The same free camera, without the
+// editor, is the game's F6 (with the OpenGL renderer).
 //
 // The file:
 //     laps 3
@@ -544,6 +545,7 @@ const TURN = 0.0025;                // radians a pixel of the mouse
 const KEY_TURN = 1.6;               // radians a second with the arrows
 const MAP_END = 255;                // tiles: the wall, at 0 and here on both axes
 const EYE_OUT = 10, EYE_LOW = 5, EYE_OVER = 1, EYE_HIGH = 50;   // tiles: where the camera can go (see checkpointsBeforeFrame)
+const EYE_OVER_FREE = 0.1;          // tiles over the ground, the game's free camera (looking up from below)
 
 let wasm = null, glCanvas = null, markers = null;
 let previewMarkers = null;          // the editor's preview, apart: it moves every frame
@@ -556,6 +558,7 @@ let dirty = true;                   // the shapes' buffer is to be made again
 // up), the keys held, what is aimed at (the camera's centre on the ground).
 const ed = {
     on: false, eye: [128, 128, 20], yaw: 0, pitch: -0.5, keys: new Set(),
+    free: false,                    // the game's free camera (F6): the editor's, without the editor
     aim: null, aimed: -1, diameter: DEFAULT_DIAMETER, panel: null, text: null, status: null,
 };
 
@@ -584,6 +587,8 @@ export function startCheckpoints(module, canvas, name, text) {
 export function stopCheckpoints() {
     if (ed.on)
         closeEditor();
+    if (ed.free)
+        stopFreeCamera();
     wasm = null;
 }
 
@@ -765,8 +770,10 @@ const forward = () => [Math.cos(ed.pitch) * Math.cos(ed.yaw), Math.cos(ed.pitch)
 
 // Before the module advances: the editor's camera moves (ms since the last
 // animation frame) and goes to the renderer.
+const flying = () => ed.on || ed.free;
+
 export function checkpointsBeforeFrame(ms) {
-    if (!ed.on || !wasm)
+    if (!flying() || !wasm)
         return;
     const dt = Math.min(ms, 100) / 1000, k = ed.keys;
     const held = (...codes) => codes.some((c) => k.has(c));
@@ -784,12 +791,16 @@ export function checkpointsBeforeFrame(ms) {
         ed.eye[2] += up * speed;
     }
     // up to EYE_OUT tiles out of the wall; between EYE_LOW (and EYE_OVER the
-    // ground) and EYE_HIGH up
+    // ground) and EYE_HIGH up; the game's, down to EYE_OVER_FREE over the ground
     ed.eye[0] = Math.max(-EYE_OUT, Math.min(MAP_END + EYE_OUT, ed.eye[0]));
     ed.eye[1] = Math.max(-EYE_OUT, Math.min(MAP_END + EYE_OUT, ed.eye[1]));
-    ed.eye[2] = Math.min(EYE_HIGH, Math.max(EYE_LOW, groundHeight(heights, ed.eye[0], ed.eye[1]) + EYE_OVER, ed.eye[2]));
+    const ground = groundHeight(heights, ed.eye[0], ed.eye[1]);
+    const low = ed.on ? Math.max(EYE_LOW, ground + EYE_OVER) : ground + EYE_OVER_FREE;
+    ed.eye[2] = Math.min(EYE_HIGH, Math.max(low, ed.eye[2]));
     const f = forward();
     wasm.web_free_camera(1, ...ed.eye, ...f);
+    if (!ed.on)
+        return;
     ed.aim = hitGround(heights, ed.eye, f);
     // aimed: the nearest along the ray, a ring of fire it goes through or
     // the checkpoint on the ground where it lands (of those, the one whose
@@ -1051,10 +1062,31 @@ function resize(sign) {
     }
 }
 
-// The page's keys while the editor is open: true when taken (not the game's).
+// The page's keys: true when taken (not the game's).  F6 (with the OpenGL
+// renderer) turns the game's free camera on and off; while it is on, the
+// keys are its (as the editor's camera's), except F1..F5, which leave it
+// for the game's camera, and Esc.
 export function checkpointsKey(e, up) {
-    if (!ed.on)
+    if (!wasm)
         return false;
+    if (!ed.on) {
+        if (e.code === 'F6') {
+            e.preventDefault();
+            if (!up)
+                ed.free ? stopFreeCamera() : startFreeCamera();
+            return true;
+        }
+        if (!ed.free || e.code === 'Escape')
+            return false;
+        if (/^F[1-5]$/.test(e.code)) {
+            stopFreeCamera();
+            return false;
+        }
+        if (e.code !== 'F11' && e.code !== 'F12')
+            e.preventDefault();
+        if (up) ed.keys.delete(e.code); else ed.keys.add(e.code);
+        return true;
+    }
     if (e.target === ed.text)                    // typing in the text: its own
         return true;
     if (e.code === 'Escape')                     // leaves the mouse look (the browser does it), not the game
@@ -1110,7 +1142,7 @@ function buildPanel() {
 // The mouse on the picture: pointer lock to look around; then clicks place
 // and remove, the wheel changes diameters.
 function onPointerDown(e) {
-    if (!ed.on || e.target.closest('#checkpointEditor'))
+    if (!flying() || e.target.closest('#checkpointEditor'))
         return;
     e.preventDefault();                          // (which also keeps the focus where it is)
     if (document.activeElement === ed.text)
@@ -1119,6 +1151,8 @@ function onPointerDown(e) {
         glCanvas.requestPointerLock?.();
         return;
     }
+    if (!ed.on)
+        return;
     if (e.button === 0)
         place(e.shiftKey);
     else if (e.button === 2 && ed.aimed >= 0) {
@@ -1127,7 +1161,7 @@ function onPointerDown(e) {
     }
 }
 function onMouseMove(e) {
-    if (!ed.on || document.pointerLockElement !== glCanvas)
+    if (!flying() || document.pointerLockElement !== glCanvas)
         return;
     ed.yaw += e.movementX * TURN;
     ed.pitch = Math.max(-1.5, Math.min(1.5, ed.pitch - e.movementY * TURN));
@@ -1140,26 +1174,54 @@ function onWheel(e) {
 }
 const noMenu = (e) => { if (ed.on && !e.target.closest('#checkpointEditor')) e.preventDefault(); };
 
+// The free camera starts where the game's was, looking the same way.
+function cameraFromGame() {
+    const p = wasm.web_view();
+    if (!p)
+        return;
+    const v = new Float32Array(wasm.memory.buffer, p, 32);
+    if (v[15] || v[11]) {
+        ed.eye = [v[16], v[18], v[17]];
+        ed.yaw = Math.atan2(v[21], v[19]);
+        ed.pitch = Math.max(-1.5, Math.min(1.5, Math.asin(Math.max(-1, Math.min(1, v[20])))));
+    }
+}
+
+// The game's free camera (F6): the editor's flying, the game going on, its
+// fog and its terrain as they are.
+function startFreeCamera() {
+    if (!markers)
+        return;
+    cameraFromGame();
+    ed.keys.clear();
+    ed.free = true;
+    addEventListener('pointerdown', onPointerDown);
+    addEventListener('mousemove', onMouseMove);
+}
+
+function stopFreeCamera() {
+    ed.free = false;
+    ed.keys.clear();
+    if (document.pointerLockElement)
+        document.exitPointerLock();
+    removeEventListener('pointerdown', onPointerDown);
+    removeEventListener('mousemove', onMouseMove);
+    wasm?.web_free_camera(0, 0, 0, 0, 1, 0, 0);
+}
+
 function openEditor() {
     if (!wasm || !markers) {
         console.log('editCheckpoints(): only in a game with the WebGL renderer');
         return false;
     }
+    if (ed.free)
+        stopFreeCamera();
     if (!ed.panel)
         buildPanel();
     ed.panel.querySelector('.cpName').textContent = mapName;
     ed.panel.hidden = false;
     ed.text.value = formatCheckpoints(data);
-    // the camera starts where the game's was, looking the same way
-    const p = wasm.web_view();
-    if (p) {
-        const v = new Float32Array(wasm.memory.buffer, p, 32);
-        if (v[15] || v[11]) {
-            ed.eye = [v[16], v[18], v[17]];
-            ed.yaw = Math.atan2(v[21], v[19]);
-            ed.pitch = Math.max(-1.5, Math.min(1.5, Math.asin(Math.max(-1, Math.min(1, v[20])))));
-        }
-    }
+    cameraFromGame();
     ed.keys.clear();
     ed.on = true;
     dirty = true;                               // the buffer: the editor's shapes

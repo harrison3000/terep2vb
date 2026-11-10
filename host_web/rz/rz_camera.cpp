@@ -9,7 +9,8 @@
 //   visão geral      fixa, o terreno inteiro (também sem alvo);
 //   livre            onde o host mandar (rzSetCameraFree), sem alvo; corte
 //                    seco ao entrar, e ao sair as outras voam de onde ela
-//                    estava (como saindo da visão geral).
+//                    estava (como saindo da visão geral), menos a congelada,
+//                    que fica ali mesmo.
 
 #include <cmath>
 
@@ -324,7 +325,17 @@ Mat4 updateCamera(RzContext* ctx) {
         ctx->targetPos = raw;
         if (!ctx->followInitialized) {
             ctx->retargetPending = ctx->retargetActive = false;
-            if (ctx->camHasLast && !ctx->camLastFollowing) {
+            if (ctx->camHasLast && ctx->camLastMode == RZ_CAMERA_FREE && mode == RZ_CAMERA_FOLLOW_FREEZE) {
+                // Da livre para a congelada: fica onde a livre estava (o host
+                // escolhe o lugar dela voando), já olhando para o alvo
+                ctx->followEye = ctx->camLastEye;
+                ctx->followLook = raw;
+                ctx->followLastRaw = raw;
+                ctx->followInitialized = true;
+                ctx->followAppliedDistance = ctx->followDistance;
+                ctx->overviewActive = false;
+                ctx->overviewBlend = 0.0f;
+            } else if (ctx->camHasLast && !ctx->camLastFollowing) {
                 // Saindo da visão geral (ou do meio da ida para ela): voa de
                 // onde a câmera está até atrás do alvo
                 ctx->overviewActive = true;
@@ -470,6 +481,7 @@ Mat4 updateCamera(RzContext* ctx) {
     if (nearPlane > 0.5f * focusDist) nearPlane = 0.5f * focusDist;
     if (nearPlane < 0.002f * radius) nearPlane = 0.002f * radius;   // ~0,36 tile: chão perto da câmera
     if (internal) nearPlane = kInternalNear * cs;                   // dentro do objeto: o painel fica perto
+    if (freeCam && nearPlane > kFreeNear * cs) nearPlane = kFreeNear * cs;   // rente ao chão: ele fica perto
     float farPlane = terrainDist + radius;
     // Com neblina, nada além do fim dela aparece: o far encosta nele (melhor precisão)
     const Vec3 toFog = ctx->fogOrigin - eye;

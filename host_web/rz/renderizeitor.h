@@ -396,7 +396,7 @@ int32_t rzSetCameraInternalAxes(RzContext* ctx, const RzVertex* forward,
    forward, nos eixos do legado (como RzVertex: x coluna, y linha, z para
    cima, em tiles), com o cima da imagem para cima (forward não pode ser
    vertical). Corte seco ao entrar; ao sair, as outras câmeras voam de onde
-   ela estava. A neblina e a parede de limite ficam em volta do olho. Feita
+   ela estava, menos a congelada (RZ_CAMERA_FOLLOW_FREEZE), que fica ali. A neblina e a parede de limite ficam em volta do olho. Feita
    para ser chamada todo frame. Erros: RZ_ERR_INVALID_ARG (nulos, não
    finitos, forward nulo ou vertical). */
 int32_t rzSetCameraFree(RzContext* ctx, const RzVertex* eye, const RzVertex* forward);
