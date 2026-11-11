@@ -1,24 +1,25 @@
-// Objetos: malhas de polígonos convexos em coordenadas absolutas do mundo.
+// Objects: meshes of convex polygons in absolute world coordinates.
 //
-// Carga: rzCreateObject cria o objeto vazio (vértices, VAO e VBO);
-// rzAddObjectPolygon / rzAddObjectTexturedPolygon validam e copiam um
-// polígono (e seus UVs ou o índice de paleta), triangulam em leque, crescem os
-// buffers da CPU e realocam o VBO. A textura do objeto fica em rz_texture.cpp.
+// Loading: rzCreateObject creates the empty object (vertices, VAO and VBO);
+// rzAddObjectPolygon / rzAddObjectTexturedPolygon check and copy a
+// polygon (and its UVs or the palette index), triangulate it as a fan, grow
+// the CPU buffers and reallocate the VBO. The object's texture is in rz_texture.cpp.
 //
-// O polígono de cor sólida (rzAddObjectPolygon) leva a cor no vértice, a da
-// paleta do PCX da textura em uso (solidColor), e passa pela mesma luz e
-// sombra que o texel de um texturizado; trocar a textura troca a paleta, e
-// os cantos são reenviados. O shaded (rzAddObjectShadedPolygon) é igual, com
-// uma cor por canto, interpolada em RGB pelo shader.
-// Os cantos dos triângulos (VBO) são estáticos: vértice do objeto, polígono,
-// UV e cor. As posições e os índices dos polígonos ficam num uniform block do
-// objeto (ObjectData, kObjectDataSize); o vertex shader busca a posição do canto e
-// calcula a normal de Newell do polígono inteiro (luz flat por polígono, mesmo
-// não plano). As linhas (rzAddObjectLine) têm posição e normal diretas.
-// Update (rzUpdateObjectVertices): passa as posições (tiles) para o mundo e
-// refaz a esfera envolvente; no frame, só as posições do bloco (e as
-// linhas) é reenviado.
-// Frame (drawObjects): um glDrawArrays por objeto visível.
+// The solid colour polygon (rzAddObjectPolygon) carries the colour in the
+// vertex, that of the palette of the PCX of the texture in use (solidColor),
+// and goes through the same light and shadow as a textured one's texel;
+// changing the texture changes the palette, and the corners are uploaded
+// again. The shaded one (rzAddObjectShadedPolygon) is the same, with a
+// colour per corner, interpolated in RGB by the shader.
+// The triangles' corners (VBO) are static: the object's vertex, polygon,
+// UV and colour. The positions and the polygons' indices are in a uniform block of the
+// object (ObjectData, kObjectDataSize); the vertex shader fetches the corner's position and
+// works out the whole polygon's Newell normal (flat light per polygon, even
+// if not planar). The lines (rzAddObjectLine) have their position and normal directly.
+// Update (rzUpdateObjectVertices): takes the positions (tiles) to the world and
+// redoes the bounding sphere; in the frame, only the block's positions (and the
+// lines) are uploaded again.
+// Frame (drawObjects): one glDrawArrays per visible object.
 
 #include <algorithm>
 #include <cmath>
@@ -29,9 +30,9 @@ using namespace rz;
 
 namespace {
 
-// A cor sólida `index` para o vértice: a da paleta das cores do objeto (a do
-// PCX da sua textura, a da fallback ou, com o xadrez gerado, a do atlas, a do
-// jogo; sem nenhuma, cinza); o índice 255 é um buraco (kCornerHole).
+// The solid colour `index` for the vertex: that of the object's colour palette (that of
+// its texture's PCX, the fallback's or, with the generated chequerboard, the atlas's, the
+// game's; with none of them, grey); index 255 is a hole (kCornerHole).
 uint32_t solidColor(const RzContext* ctx, const Object& o, int32_t index) {
     const uint8_t* palette = o.texture ? o.palette
                            : ctx->hasFallbackPalette ? ctx->fallbackPalette
@@ -46,7 +47,7 @@ bool validId(const RzContext* ctx, int32_t id) {
     return ctx && id >= 0 && id < int32_t(ctx->objects.size()) && ctx->objects[id].alive;
 }
 
-// Libera os recursos de GPU e esvazia o slot (fica livre para reuso).
+// Frees the GPU resources and empties the slot (free to be reused).
 void freeObject(Object& o) {
     if (o.texture) glDeleteTextures(1, &o.texture);
     if (o.vbo) glDeleteBuffers(1, &o.vbo);
@@ -57,8 +58,8 @@ void freeObject(Object& o) {
     o = Object{};
 }
 
-// Tiles -> mundo. O legado tem z para cima, (coluna, linha, altura); o
-// renderer tem y para cima: (x, y, z) = (coluna, altura, linha).
+// Tiles -> world. The legacy has z up, (column, row, height); the
+// renderer has y up: (x, y, z) = (column, height, row).
 void loadPositions(const RzContext* ctx, Object& o, const RzVertex* vertices) {
     const float scale = ctx->cellSize;
     for (int32_t i = 0; i < o.vertexCount(); ++i) {
@@ -68,8 +69,8 @@ void loadPositions(const RzContext* ctx, Object& o, const RzVertex* vertices) {
         o.world[i] = Vec3{ col, up, row };
     }
 
-    // Esfera envolvente (centro da caixa dos vértices, raio máximo): corte por
-    // distância (neblina) e caixa do mapa de sombra do alvo
+    // Bounding sphere (centre of the vertices' box, largest radius): culling by
+    // distance (fog) and the box of the target's shadow map
     Vec3 lo = o.world[0], hi = o.world[0];
     for (const Vec3& v : o.world) {
         lo = { fminf(lo.x, v.x), fminf(lo.y, v.y), fminf(lo.z, v.z) };
@@ -84,18 +85,18 @@ void loadPositions(const RzContext* ctx, Object& o, const RzVertex* vertices) {
     o.radius = sqrtf(r2);
 }
 
-// Linhas (rzAddObjectLine): prisma de seção quadrada (lado = grossura) em
-// volta do segmento a-b, 4 lados + 2 tampas, cor sólida da paleta com a luz
-// flat de cada face. A seção é orientada pelo "cima" do
-// mundo (não gira junto com o objeto em volta da linha; é fina, não aparece).
-// Faces no sentido do legado (horário visto de fora), para o culling.
+// Lines (rzAddObjectLine): a prism of square section (side = thickness)
+// around the segment a-b, 4 sides + 2 caps, the palette's solid colour with
+// each face's flat light. The section is oriented by the world's "up"
+// (it does not turn with the object around the line; it is thin, it does not show).
+// Faces in the legacy's direction (clockwise seen from outside), for the culling.
 void emitLines(const RzContext* ctx, const Object& o, ObjectVertex*& v) {
     for (const ObjectLine& l : o.lines) {
         const Vec3 pa = o.world[l.a], pb = o.world[l.b];
         const uint32_t color = solidColor(ctx, o, l.palette);
         Vec3 d = pb - pa;
         const float len2 = dot(d, d);
-        if (!(len2 > 0.0f)) {                                  // ponta com ponta: nada visível
+        if (!(len2 > 0.0f)) {                                  // end to end: nothing visible
             for (int32_t k = 0; k < kLineVertices; ++k) *v++ = { pa.x, pa.y, pa.z, 0, 0.0f, 0.0f, -1, 0, 0, color };
             continue;
         }
@@ -112,7 +113,7 @@ void emitLines(const RzContext* ctx, const Object& o, ObjectVertex*& v) {
         const Vec3 o4[4] = { off(1, 1), off(-1, 1), off(-1, -1), off(1, -1) };
         Vec3 ca[4], cb[4];
         for (int32_t k = 0; k < 4; ++k) { ca[k] = pa + o4[k]; cb[k] = pb + o4[k]; }
-        // quad p0..p3 com normal de fora n: ordem horária vista de fora
+        // quad p0..p3 with the outward normal n: clockwise seen from outside
         auto face = [&](Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec3 n) {
             if (dot(cross(p1 - p0, p2 - p0), n) > 0.0f) { const Vec3 t = p1; p1 = p3; p3 = t; }
             const uint32_t normal = packNormal(n);
@@ -121,34 +122,34 @@ void emitLines(const RzContext* ctx, const Object& o, ObjectVertex*& v) {
         };
         for (int32_t k = 0; k < 4; ++k) {
             const int32_t k1 = (k + 1) & 3;
-            face(ca[k], ca[k1], cb[k1], cb[k], o4[k] + o4[k1]);      // lado (normal pelo meio da aresta)
+            face(ca[k], ca[k1], cb[k1], cb[k], o4[k] + o4[k1]);      // side (normal through the edge's middle)
         }
-        face(ca[0], ca[1], ca[2], ca[3], Vec3{ -d.x, -d.y, -d.z });  // tampas
+        face(ca[0], ca[1], ca[2], ca[3], Vec3{ -d.x, -d.y, -d.z });  // caps
         face(cb[0], cb[1], cb[2], cb[3], d);
     }
 }
 
-// Tamanho do staging: polígonos + linhas (fase de carga). O VBO e os índices
-// do bloco vão no próximo frame (uploadBuffers), uma vez por objeto.
+// The staging's size: polygons + lines (loading step). The VBO and the block's
+// indices go at the next frame (uploadBuffers), once per object.
 void resizeObjectBuffers(Object& o) {
     o.staging.resize(o.triangles.size() * 3 + o.lines.size() * size_t(kLineVertices));
     o.buffersDirty = true;
     o.gpuDirty = true;
 }
 
-// Realoca o VBO no tamanho do staging e reenvia os índices dos polígonos ao bloco
+// Reallocates the VBO at the staging's size and uploads the polygons' indices to the block again
 void uploadBuffers(Object& o) {
     glBindBuffer(GL_ARRAY_BUFFER, o.vbo);
     glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(o.staging.size() * sizeof(ObjectVertex)),
                  nullptr, GL_STATIC_DRAW);
-    const std::vector<int32_t> indices(o.indices.begin(), o.indices.end());   // int no bloco
+    const std::vector<int32_t> indices(o.indices.begin(), o.indices.end());   // int in the block
     glBindBuffer(GL_UNIFORM_BUFFER, o.dataBuffer);
     glBufferSubData(GL_UNIFORM_BUFFER, kObjectIndicesOffset, GLsizeiptr(indices.size() * sizeof(int32_t)),
                     indices.data());
 }
 
-// Monta os cantos dos triângulos (e das linhas) e reenvia o vertex buffer
-// inteiro (que já tem o tamanho certo: é realocado em resizeObjectBuffers).
+// Builds the corners of the triangles (and of the lines) and uploads the whole
+// vertex buffer again (which already has the right size: reallocated in resizeObjectBuffers).
 void uploadObject(const RzContext* ctx, Object& o) {
     ObjectVertex* v = o.staging.data();
     for (const ObjectTriangle& tri : o.triangles) {
@@ -168,8 +169,8 @@ void uploadObject(const RzContext* ctx, Object& o) {
                     o.staging.data());
 }
 
-// Linhas: dependem das posições, então são refeitas e reenviadas (só a parte
-// delas, no fim do VBO) a cada update
+// Lines: they depend on the positions, so they are redone and uploaded again (only
+// their part, at the end of the VBO) at each update
 void uploadLines(const RzContext* ctx, Object& o) {
     if (o.lines.empty()) return;
     const size_t first = o.triangles.size() * 3;
@@ -180,7 +181,7 @@ void uploadLines(const RzContext* ctx, Object& o) {
                     GLsizeiptr((o.staging.size() - first) * sizeof(ObjectVertex)), o.staging.data() + first);
 }
 
-// Posições no mundo -> o bloco do objeto (vec4 por vértice)
+// Positions in the world -> the object's block (a vec4 per vertex)
 void uploadPositions(Object& o) {
     float* p = o.positionStaging.data();
     for (const Vec3& w : o.world) { *p++ = w.x; *p++ = w.y; *p++ = w.z; *p++ = 1.0f; }
@@ -189,8 +190,8 @@ void uploadPositions(Object& o) {
                     o.positionStaging.data());
 }
 
-// Layout de ObjectVertex: posição/normal/UV nos atributos 0..2 (como
-// GpuVertex) e (vértice, início, tamanho do polígono) inteiros no 3.
+// ObjectVertex's layout: position/normal/UV in attributes 0..2 (as
+// GpuVertex) and (vertex, start, length of the polygon) integers in 3.
 void setObjectBufferLayout() {
     const GLsizei stride = sizeof(ObjectVertex);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(0));
@@ -207,15 +208,15 @@ void setObjectBufferLayout() {
     glEnableVertexAttribArray(4);
 }
 
-// Liga o bloco do objeto (posições e índices) para os shaders
+// Binds the object's block (positions and indices) for the shaders
 void bindObjectBuffers(const Object& o) {
     glBindBufferBase(GL_UNIFORM_BUFFER, kObjectDataBinding, o.dataBuffer);
 }
 
-// Corpo comum de rzAddObjectPolygon (indices, cor = paletteIndex),
-// rzAddObjectShadedPolygon (indices e shades, a cor de cada canto) e
-// rzAddObjectTexturedPolygon (corners com índice + UV, paletteIndex = -1).
-// Exatamente um de indices/corners não é nulo.
+// Common body of rzAddObjectPolygon (indices, colour = paletteIndex),
+// rzAddObjectShadedPolygon (indices and shades, each corner's colour) and
+// rzAddObjectTexturedPolygon (corners with index + UV, paletteIndex = -1).
+// Exactly one of indices/corners is not null.
 int32_t addPolygon(RzContext* ctx, int32_t id, const uint16_t* indices, const RzTexVertex* corners,
                    const uint8_t* shades, int32_t count, int32_t paletteIndex) {
     if (!validId(ctx, id) || (!indices && !corners) || count < 0) return RZ_ERR_INVALID_ARG;
@@ -224,18 +225,18 @@ int32_t addPolygon(RzContext* ctx, int32_t id, const uint16_t* indices, const Rz
     auto indexAt = [&](int32_t i) { return corners ? corners[i].index : indices[i]; };
 
     int32_t n = count;
-    if (n > 1 && indexAt(n - 1) == indexAt(0)) --n;          // fechamento do legado
+    if (n > 1 && indexAt(n - 1) == indexAt(0)) --n;          // the legacy's closing
     for (int32_t i = 0; i < n; ++i) {
         if (indexAt(i) >= o.vertexCount()) return RZ_ERR_INVALID_ARG;
         if (corners && !(std::isfinite(corners[i].u) && std::isfinite(corners[i].v))) {
             return RZ_ERR_INVALID_ARG;
         }
     }
-    if (n < 3) return RZ_OK;                                  // degenerado: ignorado
-    if (o.polygonStart.size() >= 65535) return RZ_ERR_SIZE;  // polígono do triângulo é uint16
-    if (o.indices.size() + size_t(n) > size_t(kMaxObjectIndices)) return RZ_ERR_SIZE;   // não cabe no bloco
+    if (n < 3) return RZ_OK;                                  // degenerate: ignored
+    if (o.polygonStart.size() >= 65535) return RZ_ERR_SIZE;  // the triangle's polygon is a uint16
+    if (o.indices.size() + size_t(n) > size_t(kMaxObjectIndices)) return RZ_ERR_SIZE;   // does not fit in the block
 
-    // Cópia dos índices e UVs, e leque (fase de carga: os vetores crescem aqui)
+    // Copy of the indices and UVs, and the fan (loading step: the vectors grow here)
     const uint16_t polygon = uint16_t(o.polygonStart.size());
     const int32_t  first   = int32_t(o.indices.size());
     o.polygonStart.push_back(first);
@@ -258,8 +259,8 @@ int32_t addPolygon(RzContext* ctx, int32_t id, const uint16_t* indices, const Rz
 
 namespace rz {
 
-// Layout de GpuVertex (faces das rodas): posição (vec3), normal
-// (4 bytes 2-10-10-10) e UV (vec2). O VAO e o VBO já precisam estar ligados.
+// GpuVertex's layout (the wheels' faces): position (vec3), normal
+// (4 bytes 2-10-10-10) and UV (vec2). The VAO and the VBO need to be bound already.
 void setObjectVertexLayout() {
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(GpuVertex), reinterpret_cast<void*>(0));
     glEnableVertexAttribArray(0);
@@ -275,8 +276,8 @@ static bool drawable(const Object& o) {
     return o.alive && o.positioned && !o.staging.empty();
 }
 
-// Fora do alcance: a esfera inteira além da neblina (+ margem para sombras
-// longas). Sem neblina (visão geral), tudo está no alcance.
+// Out of range: the whole sphere past the fog (+ a margin for long
+// shadows). Without fog (overview), everything is in range.
 bool objectInRange(const RzContext* ctx, const Object& o) {
     if (!ctx->fogOn) return true;
     const Vec3 d = o.center - ctx->fogOrigin;
@@ -284,15 +285,15 @@ bool objectInRange(const RzContext* ctx, const Object& o) {
     return dot(d, d) <= reach * reach;
 }
 
-// No alcance e com a esfera (+ kViewCullMargin) dentro do frustum de quem
-// desenha: a câmera, ou a caixa de um mapa de sombra
+// In range and with the sphere (+ kViewCullMargin) inside the frustum of
+// what draws: the camera, or the box of a shadow map
 bool objectInView(const RzContext* ctx, const Object& o, const Frustum& f) {
     return objectInRange(ctx, o) && sphereInFrustum(f, o.center, o.radius + kViewCullMargin * ctx->cellSize);
 }
 
-// Reenvia os VBOs alterados, antes dos dois passes do frame (sem alocar,
-// fora o primeiro envio depois da carga). Os fora do alcance ficam para
-// quando entrarem (gpuDirty continua).
+// Uploads the changed VBOs again, before the frame's two passes (without
+// allocating, but for the first upload after loading). Those out of range
+// wait until they come in (gpuDirty stays).
 void prepareObjects(RzContext* ctx) {
     for (Object& o : ctx->objects) {
         if (o.alive && objectInRange(ctx, o)) prepareWheels(ctx, o);
@@ -314,15 +315,15 @@ void prepareObjects(RzContext* ctx) {
     }
 }
 
-// Passe da sombra: só a geometria (o programa de profundidade já está ligado).
-// onlyId >= 0: só esse objeto; skipId >= 0: todos menos ele.
-// Os além da neblina ou fora da caixa do mapa ficam de fora.
+// Shadow pass: only the geometry (the depth program is already bound).
+// onlyId >= 0: only that object; skipId >= 0: all but it.
+// Those past the fog or outside the map's box are left out.
 void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId, int32_t skipId) {
     const Frustum f = frustumOf(lightViewProj);
     auto selected = [&](int32_t id, const Object& o) {
         return drawable(o) && !(onlyId >= 0 && id != onlyId) && id != skipId && objectInView(ctx, o, f);
     };
-    // Objetos: programa próprio (posição do bloco)
+    // Objects: a program of their own (position from the block)
     glUseProgram(ctx->objectDepthProgram.program);
     setMatrix(ctx->objectDepthProgram.lightViewProj, lightViewProj);
     for (int32_t id = 0; id < int32_t(ctx->objects.size()); ++id) {
@@ -332,7 +333,7 @@ void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId,
         glBindVertexArray(o.vao);
         glDrawArrays(GL_TRIANGLES, 0, o.drawVertexCount());
     }
-    // Rodas: o programa de profundidade comum (fica ligado para quem chamou)
+    // Wheels: the common depth program (stays bound for the caller)
     glUseProgram(ctx->depthProgram.program);
     for (int32_t id = 0; id < int32_t(ctx->objects.size()); ++id) {
         const Object& o = ctx->objects[id];
@@ -340,9 +341,9 @@ void drawObjectsDepth(RzContext* ctx, const Mat4& lightViewProj, int32_t onlyId,
     }
 }
 
-// Culling fixo, na convenção do legado: descarta as faces em sentido
-// anti-horário na tela (glFrontFace define frente = anti-horário visual, então
-// é GL_FRONT que sai).
+// Fixed culling, in the legacy's convention: drops the faces that are
+// anticlockwise on the screen (glFrontFace sets front = visually anticlockwise,
+// so it is GL_FRONT that goes).
 void drawObjects(RzContext* ctx, const Mat4& viewProj) {
     const Frustum f = frustumOf(viewProj);
     bool programBound = false;
@@ -354,30 +355,30 @@ void drawObjects(RzContext* ctx, const Mat4& viewProj) {
             glCullFace(GL_FRONT);
             glUseProgram(prog.program);
             setMatrix(prog.viewProj, viewProj);
-            bindShadowMaps(ctx, prog.shadow);           // deixa a unidade 0 ativa
+            bindShadowMaps(ctx, prog.shadow);           // leaves unit 0 active
             bindFog(ctx, prog.fog);
             glUniform1i(prog.fromBuffer, 1);
             programBound = true;
         }
         bindObjectBuffers(o);
-        // Textura própria ou fallback
+        // Own texture or fallback
         const GLuint  texture = o.texture ? o.texture : ctx->fallbackTex;
         glBindTexture(GL_TEXTURE_2D, texture);
         glUniform1i(prog.texelMode, objectTextureGlass(ctx, o) ? kTexelsOpaqueGlass : kTexelsOpaque);
         glBindVertexArray(o.vao);
         glDrawArrays(GL_TRIANGLES, 0, o.drawVertexCount());
     }
-    if (programBound) glUniform1i(ctx->objectProgram.fromBuffer, 0);   // faces das rodas: posição direta
+    if (programBound) glUniform1i(ctx->objectProgram.fromBuffer, 0);   // the wheels' faces: position directly
 }
 
 bool objectTextureGlass(const RzContext* ctx, const Object& o) {
     return o.texture ? o.textureGlass : ctx->fallbackGlass;
 }
 
-// Os texels de vidro das texturas (rz_internal.h, kFirstGlassIndex): de novo
-// os objetos cuja textura os tem, no programa dos objetos em kTexelsGlass, com
-// o estado do vidro (rz_glass.cpp: brilho + destino x cinza, sem gravar
-// profundidade nem alfa). Não projetam sombra (a sombra do objeto inteiro já cobre).
+// The textures' glass texels (rz_internal.h, kFirstGlassIndex): again the
+// objects whose texture has them, in the objects' program in kTexelsGlass, with
+// the glass's state (rz_glass.cpp: highlight + destination x grey, writing
+// neither depth nor alpha). They cast no shadow (the whole object's shadow covers it already).
 void drawTexturedGlass(RzContext* ctx, const Mat4& viewProj) {
     const Frustum f = frustumOf(viewProj);
     const ObjectProgram& prog = ctx->objectProgram;
@@ -389,7 +390,7 @@ void drawTexturedGlass(RzContext* ctx, const Mat4& viewProj) {
             glCullFace(GL_FRONT);
             glUseProgram(prog.program);
             setMatrix(prog.viewProj, viewProj);
-            bindShadowMaps(ctx, prog.shadow);           // deixa a unidade 0 ativa
+            bindShadowMaps(ctx, prog.shadow);           // leaves unit 0 active
             bindFog(ctx, prog.fog);
             glUniform1i(prog.fromBuffer, 1);
             glUniform1i(prog.texelMode, kTexelsGlass);
@@ -434,7 +435,7 @@ int32_t rzCreateObject(RzContext* ctx, int32_t vertexCount, int32_t* outId) {
     if (vertexCount < 1) return recordError(ctx, "rzCreateObject", RZ_ERR_INVALID_ARG);
     if (vertexCount > kMaxObjectVertices) return recordError(ctx, "rzCreateObject", RZ_ERR_SIZE);
 
-    // Slot livre, ou um novo no fim (fase de carga)
+    // A free slot, or a new one at the end (loading step)
     int32_t id = 0;
     while (id < int32_t(ctx->objects.size()) && ctx->objects[id].alive) ++id;
     if (id == int32_t(ctx->objects.size())) ctx->objects.emplace_back();
@@ -443,7 +444,7 @@ int32_t rzCreateObject(RzContext* ctx, int32_t vertexCount, int32_t* outId) {
     o.world.assign(size_t(vertexCount), Vec3{ 0.0f, 0.0f, 0.0f });
     o.positionStaging.assign(size_t(vertexCount) * 4, 0.0f);
 
-    // Vertex buffer (vazio até o primeiro polígono): cantos (ObjectVertex)
+    // Vertex buffer (empty until the first polygon): corners (ObjectVertex)
     glGenVertexArrays(1, &o.vao);
     glGenBuffers(1, &o.vbo);
     glBindVertexArray(o.vao);
@@ -451,7 +452,7 @@ int32_t rzCreateObject(RzContext* ctx, int32_t vertexCount, int32_t* outId) {
     setObjectBufferLayout();
     glBindVertexArray(0);
 
-    // O bloco: posições (a cada update) e índices dos polígonos (resizeObjectBuffers)
+    // The block: positions (at each update) and the polygons' indices (resizeObjectBuffers)
     glGenBuffers(1, &o.dataBuffer);
     glBindBuffer(GL_UNIFORM_BUFFER, o.dataBuffer);
     glBufferData(GL_UNIFORM_BUFFER, kObjectDataSize, nullptr, GL_DYNAMIC_DRAW);
@@ -491,9 +492,9 @@ int32_t rzAddObjectLine(RzContext* ctx, int32_t id, uint16_t a, uint16_t b,
     if (!validId(ctx, id)) return recordError(ctx, "rzAddObjectLine", RZ_ERR_INVALID_ARG);
     Object& o = ctx->objects[id];
     if (a >= o.vertexCount() || b >= o.vertexCount()) return recordError(ctx, "rzAddObjectLine", RZ_ERR_INVALID_ARG);
-    if (!(thickness > 0.0f && thickness < 1.0e6f)) return recordError(ctx, "rzAddObjectLine", RZ_ERR_INVALID_ARG);   // pega NaN
+    if (!(thickness > 0.0f && thickness < 1.0e6f)) return recordError(ctx, "rzAddObjectLine", RZ_ERR_INVALID_ARG);   // catches NaN
     if (paletteIndex < 0 || paletteIndex > 255) return recordError(ctx, "rzAddObjectLine", RZ_ERR_INVALID_ARG);
-    if (a == b) return RZ_OK;                                  // degenerada: ignorada
+    if (a == b) return RZ_OK;                                  // degenerate: ignored
     if (o.lines.size() >= 65535) return recordError(ctx, "rzAddObjectLine", RZ_ERR_SIZE);
     o.lines.push_back({ a, b, int16_t(paletteIndex), 0.5f * thickness * ctx->cellSize });
     resizeObjectBuffers(o);

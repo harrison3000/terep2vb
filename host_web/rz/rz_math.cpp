@@ -21,7 +21,7 @@ Mat4 operator*(const Mat4& a, const Mat4& b) {
     return r;
 }
 
-// Gribb-Hartmann: cada plano é a linha 3 ± uma das linhas 0, 1, 2
+// Gribb-Hartmann: each plane is row 3 ± one of rows 0, 1, 2
 Frustum frustumOf(const Mat4& m) {
     Frustum f;
     for (int i = 0; i < 6; ++i) {
@@ -36,7 +36,7 @@ Frustum frustumOf(const Mat4& m) {
     return f;
 }
 
-// Fora se o canto mais para dentro de algum plano ainda está fora dele
+// Outside if the innermost corner for some plane is still outside it
 bool boxInFrustum(const Frustum& f, Vec3 lo, Vec3 hi) {
     for (const auto& p : f.plane) {
         const float x = p[0] >= 0.0f ? hi.x : lo.x;

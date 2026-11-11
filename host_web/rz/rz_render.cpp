@@ -1,4 +1,4 @@
-// Recursos de GPU do contexto (programas) e o frame.
+// The context's GPU resources (programs) and the frame.
 
 #include <cstdio>
 
@@ -8,21 +8,21 @@ namespace rz {
 
 namespace {
 
-// Programas: todos são pedidos de uma vez no começo de createRenderer
-// (startPrograms), e o status de cada um só é perguntado quando ele é usado
-// (linkProgram). Perguntar logo depois do link faz o WebGL esperar a
-// compilação de um por um; assim o driver compila todos juntos.
-// Os textos dos shaders ficam na página (web/shaders.js), pedidos pelo nome
-// do arquivo, com os #defines da qualidade (CASCADES).
+// Programs: all are asked for at once at the start of createRenderer
+// (startPrograms), and each one's status is only asked when it is used
+// (linkProgram). Asking right after the link makes WebGL wait for the
+// compilation one by one; this way the driver compiles them all together.
+// The shaders' texts are in the page (web/shaders.js), asked for by the
+// file's name, with the quality's #defines (CASCADES).
 struct PendingProgram {
     const char* vertexName;
     const char* fragmentName;
     GLuint program, vs, fs;
 };
 constexpr int32_t kMaxPending = 9;
-PendingProgram g_pending[kMaxPending];      // um contexto por vez
+PendingProgram g_pending[kMaxPending];      // one context at a time
 int32_t g_pendingCount = 0;
-char g_defines[64];                         // os #defines do contexto em criação
+char g_defines[64];                         // the #defines of the context being created
 
 GLuint startShader(GLenum type, const char* name) {
     GLuint shader = glCreateShader(type);
@@ -52,7 +52,7 @@ bool shaderCompiled(GLuint shader, const char* name) {
     return ok;
 }
 
-// O programa pronto, ou 0 (com o erro no console)
+// The program ready, or 0 (with the error on the console)
 GLuint finishProgram(const PendingProgram& p) {
     GLint ok = 0;
     glGetProgramiv(p.program, GL_LINK_STATUS, &ok);
@@ -69,7 +69,7 @@ GLuint finishProgram(const PendingProgram& p) {
     return ok ? p.program : 0;
 }
 
-// Todos os programas do contexto, de uma vez (ver PendingProgram)
+// All the context's programs, at once (see PendingProgram)
 void startPrograms(const RzContext* ctx) {
     std::snprintf(g_defines, sizeof(g_defines), "#define CASCADES %d\n", int(ctx->cascades));
     static const char* const kPrograms[][2] = {
@@ -82,13 +82,13 @@ void startPrograms(const RzContext* ctx) {
     for (const auto& names : kPrograms) g_pending[g_pendingCount++] = startProgram(names[0], names[1]);
 }
 
-constexpr GLint kUnitAtlas  = 0;    // unidade de textura do atlas (e da textura do objeto)
-                                    // (1: as sombras, kUnitShadow)
+constexpr GLint kUnitAtlas  = 0;    // texture unit of the atlas (and of the object's texture)
+                                    // (1: the shadows, kUnitShadow)
 
 } // namespace
 
-// Um programa, pelos nomes dos shaders (também usado por rz_border.cpp,
-// rz_glass.cpp, rz_sprites.cpp): o já pedido por startPrograms, ou compilado agora
+// A program, by the names of the shaders (also used by rz_border.cpp,
+// rz_glass.cpp, rz_sprites.cpp): the one already asked for by startPrograms, or compiled now
 GLuint linkProgram(const char* vertexName, const char* fragmentName) {
     for (int32_t i = 0; i < g_pendingCount; ++i) {
         const PendingProgram p = g_pending[i];
@@ -109,7 +109,7 @@ void initFogUniforms(GLuint program, FogUniforms& u) {
     u.origin = glGetUniformLocation(program, "uFogOrigin");
 }
 
-// Neblina do frame: liga só seguindo um alvo; cor = fundo
+// The frame's fog: on only when following a target; colour = background
 void bindFog(const RzContext* ctx, const FogUniforms& u) {
     glUniform1i(u.on, ctx->fogOn ? 1 : 0);
     glUniform1f(u.start, ctx->fogNear);
@@ -119,8 +119,8 @@ void bindFog(const RzContext* ctx, const FogUniforms& u) {
     glUniform3f(u.eye, ctx->eyePos.x, ctx->eyePos.y, ctx->eyePos.z);
 }
 
-// Luz flat (terreno e objetos): direção e ambiente, fixos; o programa precisa
-// estar em uso
+// Flat light (terrain and objects): direction and ambient, fixed; the program has to
+// be in use
 void initLightUniforms(GLuint program) {
     const Vec3 l = lightDirection();
     glUniform3f(glGetUniformLocation(program, "uLight"), l.x, l.y, l.z);
@@ -169,7 +169,7 @@ bool createRenderer(RzContext* ctx) {
     glUniformBlockBinding(o.program, glGetUniformBlockIndex(o.program, "ObjectData"), kObjectDataBinding);
     glUniform1i(o.texture, kUnitAtlas);
     glUniform1f(o.ambient, kShadowLight);
-    glUniform1f(glGetUniformLocation(o.program, "uSpecular"), kGlassSpecular);    // texels de vidro
+    glUniform1f(glGetUniformLocation(o.program, "uSpecular"), kGlassSpecular);    // glass texels
     glUniform1f(glGetUniformLocation(o.program, "uShininess"), kGlassShininess);
     initShadowUniforms(o.program, o.shadow);
     initFogUniforms(o.program, o.fog);
@@ -196,7 +196,7 @@ bool createRenderer(RzContext* ctx) {
     if (!createSprites(ctx)) return false;
     if (!createSky(ctx)) return false;
 
-    // Malha do terreno: buffer de tamanho fixo, preenchido em buildTerrainMesh
+    // The terrain's mesh: a buffer of fixed size, filled in buildTerrainMesh
     glGenVertexArrays(1, &ctx->terrainVao);
     glGenBuffers(1, &ctx->terrainVbo);
     glBindVertexArray(ctx->terrainVao);
@@ -209,7 +209,7 @@ bool createRenderer(RzContext* ctx) {
 }
 
 void destroyRenderer(RzContext* ctx) {
-    for (int32_t i = 0; i < g_pendingCount; ++i) {   // pedidos e não usados (a criação falhou antes)
+    for (int32_t i = 0; i < g_pendingCount; ++i) {   // asked for and not used (the creation failed before)
         glDeleteProgram(g_pending[i].program);
         glDeleteShader(g_pending[i].vs);
         glDeleteShader(g_pending[i].fs);
@@ -242,10 +242,10 @@ void renderFrame(RzContext* ctx) {
     glViewport(0, 0, ctx->width, ctx->height);
     glClearColor(ctx->backgroundR, ctx->backgroundG, ctx->backgroundB, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    drawSky(ctx);                                 // atrás de tudo: sol ou lua, nuvens
+    drawSky(ctx);                                 // behind everything: sun or moon, clouds
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
-    glFrontFace(GL_CCW);                          // frente = anti-horário na tela (como no software)
+    glFrontFace(GL_CCW);                          // front = anticlockwise on the screen (as in the software one)
 
     if (ctx->hasTerrain()) {
         const TerrainProgram& t = ctx->terrainProgram;
@@ -258,13 +258,13 @@ void renderFrame(RzContext* ctx) {
         glActiveTexture(GL_TEXTURE0 + GLenum(kUnitAtlas));
         glBindTexture(GL_TEXTURE_2D_ARRAY, textured ? ctx->atlasTex : 0);
 
-        glEnable(GL_CULL_FACE);                   // terreno: só a face de cima
+        glEnable(GL_CULL_FACE);                   // terrain: only the top face
         glCullFace(GL_BACK);
-        drawTerrain(ctx, viewProj, ctx->fogOn);   // só os blocos na tela e antes do fim da neblina
-        if (ctx->fogOn && ctx->skirtOn) drawSkirt(ctx, viewProj, true);   // continuação além do mapa: só com neblina
+        drawTerrain(ctx, viewProj, ctx->fogOn);   // only the chunks on the screen and before the end of the fog
+        if (ctx->fogOn && ctx->skirtOn) drawSkirt(ctx, viewProj, true);   // continuation past the map: only with fog
     }
 
-    {                                             // discos projetados (rzSetObjectDecals)
+    {                                             // projected discs (rzSetObjectDecals)
         const ObjectProgram& o = ctx->objectProgram;
         glUseProgram(o.program);
         glUniform1i(o.decalCount, ctx->decalCount);
@@ -274,12 +274,12 @@ void renderFrame(RzContext* ctx) {
         }
     }
     drawObjects(ctx, viewProj);
-    drawWheels(ctx, viewProj);                    // pneus das rodas: programa do terreno, sem textura
-    drawWheelFaces(ctx, viewProj);                // faces das rodas: programa dos objetos, texturizadas
-    drawGlass(ctx, viewProj);                     // vidro: filtro + brilho, depois do opaco
-    drawTexturedGlass(ctx, viewProj);             // texels de vidro: o mesmo filtro
-    drawSprites(ctx, viewProj);                   // fumaça etc.: alfa, de trás para frente
-    drawWall(ctx, viewProj);                      // semitransparente: por último
+    drawWheels(ctx, viewProj);                    // the wheels' tyres: the terrain's program, without texture
+    drawWheelFaces(ctx, viewProj);                // the wheels' faces: the objects' program, textured
+    drawGlass(ctx, viewProj);                     // glass: filter + highlight, after the opaque
+    drawTexturedGlass(ctx, viewProj);             // glass texels: the same filter
+    drawSprites(ctx, viewProj);                   // smoke etc.: alpha, back to front
+    drawWall(ctx, viewProj);                      // semi-transparent: last
 }
 
 } // namespace rz

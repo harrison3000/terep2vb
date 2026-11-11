@@ -109,7 +109,7 @@ larger scales only the drawing changes; the game state is identical at any scale
 - text, sprites, wheels and the pixels of the car model scale by the same factor.
 
 The rest (affine texturing, Gouraud, dithering) is the original rasteriser, just finer.
-![`docs/alta_resolucao.gif`](docs/alta_resolucao.gif)
+![`docs/high_resolution.gif`](docs/high_resolution.gif)
 Compares 1x upscaled and 4x.
 
 ### Controls

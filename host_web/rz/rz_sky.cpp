@@ -1,10 +1,10 @@
-// Céu: um triângulo que cobre a tela, desenhado logo depois de limpar (atrás
-// de tudo, sem profundidade). A base é a cor de fundo (a da neblina: o
-// horizonte emenda com o terreno que some nela); por cima, o sol (fundo
-// claro) ou a lua (fundo escuro) na direção da luz, e nuvens discretas num
-// plano alto, em células (levemente pixelizadas), andando devagar, sumindo
-// perto do horizonte. O raio de cada pixel sai da base da câmera e das
-// focais (sem inverter matriz).
+// Sky: a triangle that covers the screen, drawn right after clearing (behind
+// everything, no depth). The base is the background colour (the fog's: the
+// horizon blends into the terrain that fades into it); over it, the sun (light
+// background) or the moon (dark background) in the light's direction, and
+// discreet clouds on a high plane, in cells (slightly pixelated), drifting slowly,
+// fading near the horizon. Each pixel's ray comes from the camera's basis and
+// the focals (no matrix inversion).
 
 #include "rz_internal.h"
 
@@ -21,7 +21,7 @@ bool createSky(RzContext* ctx) {
     s.light   = glGetUniformLocation(s.program, "uLight");
     s.color   = glGetUniformLocation(s.program, "uColor");
     s.time    = glGetUniformLocation(s.program, "uTime");
-    glGenVertexArrays(1, &ctx->skyVao);           // sem atributos: os cantos saem de gl_VertexID
+    glGenVertexArrays(1, &ctx->skyVao);           // no attributes: the corners come from gl_VertexID
     return glGetError() == GL_NO_ERROR;
 }
 
@@ -30,7 +30,7 @@ void destroySky(RzContext* ctx) {
     if (ctx->skyVao) glDeleteVertexArrays(1, &ctx->skyVao);
 }
 
-// Depois do glClear, antes de tudo (a câmera do frame já calculada)
+// After glClear, before everything (the frame's camera already worked out)
 void drawSky(const RzContext* ctx) {
     const SkyProgram& s = ctx->skyProgram;
     const Vec3 l = lightDirection();

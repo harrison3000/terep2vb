@@ -1,5 +1,5 @@
-// Implementação da interface C (WebGL 2, no canvas da página). As alocações e
-// uploads para a GPU acontecem na criação e nas funções de carga; rzRender não aloca.
+// Implementation of the C interface (WebGL 2, on the page's canvas). The allocations and
+// uploads to the GPU happen at creation and in the loading functions; rzRender does not allocate.
 
 #include <cmath>
 #include <cstring>
@@ -23,8 +23,8 @@ void setSize(RzContext* ctx, int32_t width, int32_t height) {
     ctx->focalX = focal * float(height) / float(width);
 }
 
-// Cor de fundo em float a partir do índice e da paleta do atlas; sem índice
-// ou sem atlas, a cor padrão.
+// Background colour in float from the index and the atlas's palette; with no index
+// or no atlas, the default colour.
 void updateBackgroundColor(RzContext* ctx) {
     if (ctx->backgroundIndex < 0 || !ctx->hasAtlasPalette) {
         ctx->backgroundR = kBackgroundR;
@@ -39,13 +39,13 @@ void updateBackgroundColor(RzContext* ctx) {
     ctx->backgroundB = float(rgb[2]) * inv255;
 }
 
-// Um tamanho de canvas que serve
+// A canvas size that will do
 bool validSize(int32_t width, int32_t height) {
     return width >= 1 && height >= 1 && width <= kMaxWindowSize && height <= kMaxWindowSize;
 }
 
-// Erro da última rzCreate que falhou (não há contexto onde guardar);
-// devolvido por rzGetError(NULL).
+// Error of the last rzCreate that failed (there is no context to keep it in);
+// returned by rzGetError(NULL).
 int32_t     g_createError = RZ_OK;
 const char* g_createErrorFunction = nullptr;
 
@@ -76,7 +76,7 @@ int32_t rzGetError(RzContext* ctx, const char** outFunction) {
         g_createError = RZ_OK;
         g_createErrorFunction = nullptr;
     } else {
-        err = RZ_ERR_INVALID_ARG;      // contexto nulo sem falha de criação registrada
+        err = RZ_ERR_INVALID_ARG;      // null context with no creation failure recorded
         function = nullptr;
     }
     if (outFunction) *outFunction = function;
@@ -90,12 +90,12 @@ int32_t rzCreate(int32_t width, int32_t height, int32_t shadowSize, int32_t casc
     if (!validSize(width, height)) return recordCreateError("rzCreate", RZ_ERR_SIZE);
     if (shadowSize == 0) shadowSize = kShadowMapSize;
     if (shadowSize < 256 || shadowSize > 4096 || (shadowSize & (shadowSize - 1)) || (cascades != 1 && cascades != 3) ||
-        (cascades == 1 && !(reach >= 1.0f && reach <= 60.0f)))               // pega NaN
+        (cascades == 1 && !(reach >= 1.0f && reach <= 60.0f)))               // catches NaN
         return recordCreateError("rzCreate", RZ_ERR_INVALID_ARG);
     if (!canvasContext()) return recordCreateError("rzCreate", RZ_ERR_GL);
 
-    RzContext* ctx = new RzContext;     // padrões nos inicializadores dos membros
-    ctx->shadowSize = shadowSize;       // pedido; createShadowMaps limita ao driver
+    RzContext* ctx = new RzContext;     // defaults in the members' initialisers
+    ctx->shadowSize = shadowSize;       // asked for; createShadowMaps limits it to the driver
     ctx->cascades   = cascades;
     ctx->shadowReach = cascades == 1 ? reach : kCascadeSplit1;
     setSize(ctx, width, height);
@@ -121,7 +121,7 @@ int32_t rzSetHeightmap(RzContext* ctx, const uint8_t* data,
     if (width != kGridSize || height != kGridSize) return recordError(ctx, "rzSetHeightmap", RZ_ERR_SIZE);
 
     ctx->heights.assign(data, data + kVertexCount);
-    ctx->heightSource = data;                  // relido por rzUpdateTerrain
+    ctx->heightSource = data;                  // read again by rzUpdateTerrain
     updateTerrainBounds(ctx);
     return recordError(ctx, "rzSetHeightmap", buildTerrainMesh(ctx) ? RZ_OK : RZ_ERR_GL);
 }
@@ -133,7 +133,7 @@ int32_t rzSetTerrainScale(RzContext* ctx,
     ctx->cellSize    = cellSize;
     ctx->heightScale = heightScale;
     updateTerrainBounds(ctx);
-    if (ctx->hasTerrain()) {          // posições e iluminação dependem da escala
+    if (ctx->hasTerrain()) {          // positions and lighting depend on the scale
         if (!buildTerrainMesh(ctx)) return recordError(ctx, "rzSetTerrainScale", RZ_ERR_GL);
     }
     return RZ_OK;
@@ -142,8 +142,8 @@ int32_t rzSetTerrainScale(RzContext* ctx,
 int32_t rzLoadTileAtlas(RzContext* ctx, const uint8_t* pcx, int32_t size) {
     if (!ctx || !pcx) return recordError(ctx, "rzLoadTileAtlas", RZ_ERR_INVALID_ARG);
 
-    // Decodifica tudo antes de mexer na textura: se o arquivo falhar, o atlas anterior fica.
-    // Só o canto superior esquerdo, 256x256
+    // Decodes everything before touching the texture: if the file fails, the previous atlas stays.
+    // Only the top left corner, 256x256
     PcxImage img;
     int32_t err = decodePcx(pcx, size, img);
     if (err == RZ_OK && (img.width < kAtlasSize || img.height < kAtlasSize)) err = RZ_ERR_SIZE;
@@ -153,7 +153,7 @@ int32_t rzLoadTileAtlas(RzContext* ctx, const uint8_t* pcx, int32_t size) {
         std::memcpy(indices.data() + y * kAtlasSize, img.pixels.data() + size_t(y) * size_t(img.width), size_t(kAtlasSize));
     const uint8_t* paletteRGB = img.palette.data();
 
-    // 256 blocos x (256 + 64 + 16 + 4 + 1) texels, por nível; temporário da carga
+    // 256 blocks x (256 + 64 + 16 + 4 + 1) texels, by level; temporary, for loading
     constexpr int32_t kTexels = kMaxTiles * 341;
     std::vector<uint32_t> tiles(kTexels);
     buildAtlasLevels(tiles.data(), indices.data(), paletteRGB);
@@ -170,16 +170,16 @@ int32_t rzLoadTileAtlas(RzContext* ctx, const uint8_t* pcx, int32_t size) {
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, kMipLevels - 1);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    // filtro fixo: ampliação nearest; redução nearest no nível, linear entre níveis
+    // fixed filter: magnification nearest; minification nearest in the level, linear between levels
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     if (glGetError() != GL_NO_ERROR) return recordError(ctx, "rzLoadTileAtlas", RZ_ERR_GL);
     ctx->hasAtlas = true;
-    setSpritePalette(ctx, paletteRGB);                // sprites: paleta do jogo
+    setSpritePalette(ctx, paletteRGB);                // sprites: the game's palette
     std::memcpy(ctx->atlasPalette, paletteRGB, sizeof(ctx->atlasPalette));
     ctx->hasAtlasPalette = true;
-    markObjectsDirty(ctx);                            // as cores sólidas sem paleta própria
-    updateBackgroundColor(ctx);                       // fundo: índice nesta paleta
+    markObjectsDirty(ctx);                            // the solid colours with no palette of their own
+    updateBackgroundColor(ctx);                       // background: an index in this palette
     return RZ_OK;
 }
 
@@ -187,16 +187,16 @@ int32_t rzSetTileMap(RzContext* ctx, const uint8_t* data,
                      int32_t width, int32_t height) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
     if (!data) {
-        ctx->hasTileMap = false;     // a malha mantém os blocos; só deixam de ser usados
+        ctx->hasTileMap = false;     // the mesh keeps the blocks; they just stop being used
         ctx->tileSource = nullptr;
         return RZ_OK;
     }
     if (width != kGridSize || height != kGridSize) return recordError(ctx, "rzSetTileMap", RZ_ERR_SIZE);
 
     ctx->tileMap.assign(data, data + kVertexCount);
-    ctx->tileSource = data;          // relido por rzUpdateTerrain
+    ctx->tileSource = data;          // read again by rzUpdateTerrain
     ctx->hasTileMap = true;
-    if (ctx->hasTerrain()) {          // o bloco vai no vértice (relevo e sombra ficam)
+    if (ctx->hasTerrain()) {          // the block goes in the vertex (relief and shadow stay)
         if (!rebuildTerrainTiles(ctx)) return recordError(ctx, "rzSetTileMap", RZ_ERR_GL);
     }
     return RZ_OK;
@@ -216,8 +216,8 @@ int32_t rzSetBackgroundColor(RzContext* ctx, uint8_t paletteIndex) {
 
 int32_t rzSetFog(RzContext* ctx, float start, float end) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
-    if (!(start >= 0.0f && start < end && end <= kFogMaxEnd)) return recordError(ctx, "rzSetFog", RZ_ERR_INVALID_ARG);   // pega NaN
-    ctx->fogStart = start;     // só valores: uniforms, far plane e cortes leem no rzRender
+    if (!(start >= 0.0f && start < end && end <= kFogMaxEnd)) return recordError(ctx, "rzSetFog", RZ_ERR_INVALID_ARG);   // catches NaN
+    ctx->fogStart = start;     // only values: uniforms, far plane and culling read them in rzRender
     ctx->fogEnd   = end;
     return RZ_OK;
 }
@@ -238,8 +238,8 @@ int32_t rzSetCameraTarget(RzContext* ctx, int32_t id, int32_t vertex) {
         vertex < 0 || vertex >= ctx->objects[id].vertexCount()) {
         return recordError(ctx, "rzSetCameraTarget", RZ_ERR_INVALID_ARG);
     }
-    // Outro alvo: seguindo um, a câmera vai até o novo (rz_camera.cpp); vindo
-    // da visão geral, começa direto atrás dele
+    // Another target: following one, the camera goes to the new one (rz_camera.cpp);
+    // coming from the overview, it starts right behind it
     if (id != ctx->cameraTargetObject) ctx->retargetPending = ctx->followInitialized;
     ctx->cameraTargetObject = id;
     ctx->cameraTargetVertex = vertex;
@@ -257,19 +257,19 @@ int32_t rzSetCameraInternalAxes(RzContext* ctx, const RzVertex* forward,
                                 const RzVertex* up) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
     if (!forward || !up) return recordError(ctx, "rzSetCameraInternalAxes", RZ_ERR_INVALID_ARG);
-    // Eixos do legado (coluna, linha, cima) -> mundo (x, y para cima, z)
+    // The legacy's axes (column, row, up) -> world (x, y up, z)
     Vec3 f = { forward->x, forward->z, forward->y };
     Vec3 u = { up->x, up->z, up->y };
     const float lf = sqrtf(dot(f, f));
     const float lu0 = sqrtf(dot(u, u));
     if (!(lf > 1.0e-12f && lf < 1.0e30f) || !(lu0 > 1.0e-12f && lu0 < 1.0e30f)) {
-        return recordError(ctx, "rzSetCameraInternalAxes", RZ_ERR_INVALID_ARG);   // nulo ou NaN
+        return recordError(ctx, "rzSetCameraInternalAxes", RZ_ERR_INVALID_ARG);   // null or NaN
     }
     f = { f.x / lf, f.y / lf, f.z / lf };
-    const float along = dot(u, f);                     // up perpendicular a forward
+    const float along = dot(u, f);                     // up perpendicular to forward
     u = { u.x - f.x * along, u.y - f.y * along, u.z - f.z * along };
     const float lu = sqrtf(dot(u, u));
-    if (!(lu > 1.0e-6f * lu0)) return recordError(ctx, "rzSetCameraInternalAxes", RZ_ERR_INVALID_ARG);   // paralelos
+    if (!(lu > 1.0e-6f * lu0)) return recordError(ctx, "rzSetCameraInternalAxes", RZ_ERR_INVALID_ARG);   // parallel
     u = { u.x / lu, u.y / lu, u.z / lu };
     ctx->internalForward = f;
     ctx->internalUp      = u;
@@ -285,14 +285,14 @@ int32_t rzSetObjectDecals(RzContext* ctx, const RzDecal* decals, int32_t count) 
         const RzDecal& d = decals[i];
         const float v[] = { d.x, d.y, d.radius, d.alpha, d.r, d.g, d.b };
         for (float f : v)
-            if (!(fabsf(f) < 1.0e6f)) return recordError(ctx, "rzSetObjectDecals", RZ_ERR_INVALID_ARG);   // NaN, infinito
+            if (!(fabsf(f) < 1.0e6f)) return recordError(ctx, "rzSetObjectDecals", RZ_ERR_INVALID_ARG);   // NaN, infinity
         if (!(d.radius > 0.0f)) return recordError(ctx, "rzSetObjectDecals", RZ_ERR_INVALID_ARG);
     }
     const float cs = ctx->cellSize;
     for (int32_t i = 0; i < count; ++i) {
         const RzDecal& d = decals[i];
         float* p = ctx->decals + 4 * i;
-        p[0] = d.x * cs; p[1] = d.y * cs; p[2] = d.radius * cs; p[3] = d.alpha;   // legado -> mundo (x, z)
+        p[0] = d.x * cs; p[1] = d.y * cs; p[2] = d.radius * cs; p[3] = d.alpha;   // legacy -> world (x, z)
         float* c = ctx->decalColors + 3 * i;
         c[0] = d.r; c[1] = d.g; c[2] = d.b;
     }
@@ -304,11 +304,11 @@ int32_t rzSetCameraFree(RzContext* ctx, const RzVertex* eye, const RzVertex* for
     if (!ctx) return RZ_ERR_INVALID_ARG;
     if (!eye || !forward) return recordError(ctx, "rzSetCameraFree", RZ_ERR_INVALID_ARG);
     const float cs = ctx->cellSize;
-    const Vec3 e = { eye->x * cs, eye->z * cs, eye->y * cs };         // legado -> mundo
+    const Vec3 e = { eye->x * cs, eye->z * cs, eye->y * cs };         // legacy -> world
     Vec3 f = { forward->x, forward->z, forward->y };
     const float lf = sqrtf(dot(f, f));
     if (!(lf > 1.0e-12f && lf < 1.0e30f) || !(fabsf(e.x) < 1.0e6f && fabsf(e.y) < 1.0e6f && fabsf(e.z) < 1.0e6f))
-        return recordError(ctx, "rzSetCameraFree", RZ_ERR_INVALID_ARG);   // nulo, NaN ou longe demais
+        return recordError(ctx, "rzSetCameraFree", RZ_ERR_INVALID_ARG);   // null, NaN or too far
     f = { f.x / lf, f.y / lf, f.z / lf };
     if (fabsf(f.y) > 0.9999f) return recordError(ctx, "rzSetCameraFree", RZ_ERR_INVALID_ARG);   // vertical
     ctx->freeEye = e;
@@ -336,9 +336,9 @@ int32_t rzGetView(const RzContext* ctx, float* out) {
 
 int32_t rzSetCameraFov(RzContext* ctx, float degrees) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
-    if (!(degrees >= kFovYMin && degrees <= kFovYMax)) return recordError(ctx, "rzSetCameraFov", RZ_ERR_INVALID_ARG);   // pega NaN
+    if (!(degrees >= kFovYMin && degrees <= kFovYMax)) return recordError(ctx, "rzSetCameraFov", RZ_ERR_INVALID_ARG);   // catches NaN
     ctx->fovY = degrees;
-    setSize(ctx, ctx->width, ctx->height);        // só a focal muda; vale no próximo rzRender
+    setSize(ctx, ctx->width, ctx->height);        // only the focal changes; from the next rzRender
     return RZ_OK;
 }
 
@@ -356,14 +356,14 @@ int32_t rzSetCameraFollow(RzContext* ctx, float distance, float height,
 int32_t rzSetSize(RzContext* ctx, int32_t width, int32_t height) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
     if (!validSize(width, height)) return recordError(ctx, "rzSetSize", RZ_ERR_SIZE);
-    setSize(ctx, width, height);                  // vale no próximo rzRender
+    setSize(ctx, width, height);                  // from the next rzRender
     return RZ_OK;
 }
 
 int32_t rzRender(RzContext* ctx, float frames) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
-    ctx->frameStep = frames > 0.0f ? (frames < 15.0f ? frames : 15.0f) : 0.0f;   // NaN também: 0
-    renderFrame(ctx);           // sem glGetError: no WebGL ele espera a GPU (só na carga)
+    ctx->frameStep = frames > 0.0f ? (frames < 15.0f ? frames : 15.0f) : 0.0f;   // NaN too: 0
+    renderFrame(ctx);           // no glGetError: in WebGL it waits for the GPU (only at loading)
     return RZ_OK;
 }
 

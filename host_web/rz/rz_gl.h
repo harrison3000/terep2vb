@@ -1,7 +1,7 @@
-// O WebGL 2 que o renderer usa: as funções são imports do módulo "gl",
-// feitas por web/webgl.js, uma para uma, com os nomes e os números do
-// OpenGL ES 3.0. Ponteiros são posições na memória do módulo. Mais as duas
-// do canvas: o contexto (criado uma vez).
+// The WebGL 2 the renderer uses: the functions are imports of the module "gl",
+// provided by web/webgl.js, one for one, with OpenGL ES 3.0's names and
+// numbers. Pointers are positions in the module's memory. Plus the two
+// for the canvas: the context (created once).
 #pragma once
 
 #include <cstddef>
@@ -82,7 +82,7 @@ constexpr GLenum GL_FRAMEBUFFER_COMPLETE    = 0x8CD5;
 
 #define RZ_GL(name) extern "C" __attribute__((import_module("gl"), import_name(#name)))
 
-// O canvas (webgl.js): cria o contexto WebGL 2 na primeira vez (false: não há)
+// The canvas (webgl.js): creates the WebGL 2 context the first time (false: there is none)
 RZ_GL(canvasContext) bool canvasContext();
 
 RZ_GL(glGetError)       GLenum glGetError();
@@ -122,8 +122,8 @@ RZ_GL(glFramebufferTextureLayer) void glFramebufferTextureLayer(GLenum target, G
 
 RZ_GL(glCreateShader)      GLuint glCreateShader(GLenum type);
 RZ_GL(glDeleteShader)      void glDeleteShader(GLuint shader);
-// O texto do shader: o de `name` em web/shaders.js, depois do #version e
-// de `defines` (linhas "#define ...")
+// The shader's text: that of `name` in web/shaders.js, after the #version and
+// `defines` ("#define ..." lines)
 RZ_GL(shaderSourceByName)  void shaderSourceByName(GLuint shader, const char* name, const char* defines);
 RZ_GL(glCompileShader)     void glCompileShader(GLuint shader);
 RZ_GL(glGetShaderiv)       void glGetShaderiv(GLuint shader, GLenum name, GLint* params);
@@ -143,7 +143,7 @@ RZ_GL(glUniform3fv)        void glUniform3fv(GLint loc, GLsizei count, const GLf
 RZ_GL(glUniform4fv)        void glUniform4fv(GLint loc, GLsizei count, const GLfloat* v);
 RZ_GL(glGetUniformBlockIndex) GLuint glGetUniformBlockIndex(GLuint program, const GLchar* name);
 RZ_GL(glUniformBlockBinding)  void glUniformBlockBinding(GLuint program, GLuint block, GLuint binding);
-// transpose: sempre GL_FALSE no WebGL (setMatrices, rz_internal.h)
+// transpose: always GL_FALSE in WebGL (setMatrices, rz_internal.h)
 RZ_GL(glUniformMatrix4fv)  void glUniformMatrix4fv(GLint loc, GLsizei count, GLboolean transpose,
                                                    const GLfloat* v);
 

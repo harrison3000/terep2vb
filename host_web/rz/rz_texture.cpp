@@ -1,22 +1,22 @@
-// Texturas dos objetos: uma textura 2D quadrada por objeto, lida de um PCX de
-// 8 bits, e uma textura fallback para os objetos sem textura própria ou cuja
-// carga falhou: um xadrez gerado aqui, ou um PCX (rzLoadFallbackTexture).
+// The objects' textures: a square 2D texture per object, read from an 8-bit
+// PCX, and a fallback texture for the objects with no texture of their own or
+// whose loading failed: a chequerboard made here, or a PCX (rzLoadFallbackTexture).
 //
-// Tamanho: a largura da imagem dita o lado W, a maior potência de 2 que cabe
-// nela (mínimo 256, máximo kMaxObjectTexture e o limite do driver). Na
-// horizontal, o que sobra à direita é descartado; na vertical, a imagem é
-// cortada em W linhas ou completada embaixo repetindo a última linha. Assim
-// v = 1 corresponde a W pixels, a mesma escala de u.
+// Size: the image's width sets the side W, the largest power of 2 that fits
+// in it (at least 256, at most kMaxObjectTexture and the driver's limit).
+// Horizontally, what is left on the right is dropped; vertically, the image is
+// cut at W rows or completed below repeating the last row. So
+// v = 1 is W pixels, the same scale as u.
 //
-// A paleta do PCX fica com a textura: as cores sólidas (rzAddObjectPolygon)
-// saem dela (rz_object.cpp). O xadrez fallback gerado aqui não tem paleta.
+// The PCX's palette stays with the texture: the solid colours (rzAddObjectPolygon)
+// come from it (rz_object.cpp). The fallback chequerboard made here has no palette.
 //
-// Texels de vidro (índices 240..254, kFirstGlassIndex): ver rz_internal.h.
+// Glass texels (indices 240..254, kFirstGlassIndex): see rz_internal.h.
 //
-// Mipmaps gerados na CPU: cada texel de um nível é da classe (opaco, vidro ou
-// transparente) da maioria dos 4 de baixo, com a média das cores só deles (o
-// alfa não mistura as classes); filtro fixo, o mesmo do chão (nearest no
-// nível, linear entre níveis).
+// Mipmaps made on the CPU: each texel of a level is of the class (opaque, glass
+// or transparent) of the majority of the 4 below, with the average of their
+// colours only (the alpha does not mix the classes); fixed filter, the same as
+// the ground's (nearest in the level, linear between levels).
 
 #include <cstring>
 
@@ -30,7 +30,7 @@ constexpr int32_t  kMinObjectTexture = 256;
 constexpr int32_t  kMaxObjectTexture = 4096;
 constexpr int32_t  kFallbackSize     = 256;
 constexpr int32_t  kFallbackCell     = 32;
-constexpr uint32_t kFallbackColorA   = 0x00C040C0u;   // magenta: "sem textura"
+constexpr uint32_t kFallbackColorA   = 0x00C040C0u;   // magenta: "no texture"
 constexpr uint32_t kFallbackColorB   = 0x00302830u;
 
 int32_t floorPow2(int32_t v) {
@@ -48,14 +48,14 @@ void releaseTexture(Object& o) {
     o.texture = 0;
 }
 
-// A classe do texel pelo alfa: 0 transparente, 1 vidro, 2 opaco
+// The texel's class by the alpha: 0 transparent, 1 glass, 2 opaque
 int32_t texelClass(uint32_t t) {
     const uint32_t a = t >> 24;
     return a == 0 ? 0 : (a == kGlassAlpha ? 1 : 2);
 }
 
-// Nível L+1 a partir do L (rgbaTexel): a classe da maioria dos 4 texels (no
-// empate, a mais opaca), com a média arredondada das cores deles
+// Level L+1 from L (rgbaTexel): the class of the majority of the 4 texels (on
+// a tie, the most opaque), with the rounded average of their colours
 void downsampleClasses(const uint32_t* src, uint32_t* dst, int32_t dstSide) {
     const int32_t srcSide = dstSide * 2;
     constexpr uint32_t kAlpha[3] = { 0, kGlassAlpha, 255 };
@@ -89,8 +89,8 @@ int32_t mipLevels(int32_t side) {
     return levels;
 }
 
-// Filtro fixo: ampliação nearest; redução nearest dentro do nível e mistura
-// linear entre níveis (GL_NEAREST_MIPMAP_LINEAR)
+// Fixed filter: magnification nearest; minification nearest within the level and
+// linear blending between levels (GL_NEAREST_MIPMAP_LINEAR)
 void applyFilter2D(GLuint texture, int32_t side) {
     glBindTexture(GL_TEXTURE_2D, texture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
@@ -98,11 +98,11 @@ void applyFilter2D(GLuint texture, int32_t side) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mipLevels(side) - 1);
 }
 
-// rgba: side x side texels (rgbaTexel; linha 0 = v 0). Gera os mipmaps na CPU
-// e sobe tudo; devolve 0 se o WebGL falhar.
+// rgba: side x side texels (rgbaTexel; row 0 = v 0). Makes the mipmaps on the CPU
+// and uploads it all; returns 0 if WebGL fails.
 GLuint uploadSquareTexture(const uint32_t* rgba, int32_t side) {
     const int32_t levels = mipLevels(side);
-    std::vector<uint32_t> chain;                         // temporário da carga
+    std::vector<uint32_t> chain;                         // temporary, for loading
     size_t total = 0;
     for (int32_t l = 0; l < levels; ++l) total += size_t(side >> l) * size_t(side >> l);
     chain.resize(total);
@@ -119,7 +119,7 @@ GLuint uploadSquareTexture(const uint32_t* rgba, int32_t side) {
             const int32_t prev = s * 2;
             downsampleClasses(chain.data() + offset - size_t(prev) * size_t(prev), chain.data() + offset, s);
         }
-        fillTransparent(chain.data() + offset, s);       // cor dos buracos = vizinhos opacos
+        fillTransparent(chain.data() + offset, s);       // colour of the holes = opaque neighbours
         glTexImage2D(GL_TEXTURE_2D, l, GL_RGBA8, s, s, 0, GL_RGBA, GL_UNSIGNED_BYTE,
                      chain.data() + offset);
         offset += size_t(s) * size_t(s);
@@ -134,9 +134,9 @@ GLuint uploadSquareTexture(const uint32_t* rgba, int32_t side) {
     return texture;
 }
 
-// PCX -> textura quadrada (regras do topo do arquivo), a paleta dele (768
-// bytes RGB) e se há texels de vidro. Em caso de erro, nada é criado e
-// *outTexture fica 0.
+// PCX -> square texture (the rules at the top of the file), its palette (768
+// bytes RGB) and whether it has glass texels. On an error, nothing is created and
+// *outTexture stays 0.
 static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint* outTexture,
                                         uint8_t* outPalette, bool* outGlass) {
     *outTexture = 0;
@@ -152,14 +152,14 @@ static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint
     if (driverMax > 0 && driverMax < limit) limit = driverMax;
     const int32_t side = floorPow2(img.width < limit ? img.width : limit);
 
-    // Canto superior esquerdo, side x side; abaixo da imagem, repete a última linha
+    // Top left corner, side x side; below the image, the last row repeats
     uint32_t pal[256];
     for (int i = 0; i < 256; ++i) {
         const uint32_t rgb = (uint32_t(img.palette[i * 3 + 0]) << 16) | (uint32_t(img.palette[i * 3 + 1]) << 8)
                            | uint32_t(img.palette[i * 3 + 2]);
-        pal[i] = rgbaTexel(rgb, i == kTransparentIndex ? 0 : 255);   // 255: transparente
+        pal[i] = rgbaTexel(rgb, i == kTransparentIndex ? 0 : 255);   // 255: transparent
     }
-    for (int32_t i = kFirstGlassIndex; i < kTransparentIndex; ++i) {   // vidro: o cinza do tom
+    for (int32_t i = kFirstGlassIndex; i < kTransparentIndex; ++i) {   // glass: the tone's grey
         const int32_t tone = i == kFirstGlassIndex ? kGlassTexelTone0 : i - kFirstGlassIndex;
         const uint32_t g = uint32_t(tone * 255 + 7) / 15;
         pal[i] = rgbaTexel((g << 16) | (g << 8) | g, kGlassAlpha);
@@ -181,8 +181,8 @@ static int32_t loadSquareTextureFromPcx(const uint8_t* pcx, int32_t size, GLuint
     return RZ_OK;
 }
 
-// Xadrez magenta/escuro: fácil de ver que o objeto ficou sem textura.
-// Substitui (e libera) a fallback atual.
+// Magenta/dark chequerboard: easy to see that the object was left with no texture.
+// Replaces (and frees) the current fallback.
 bool createFallbackTexture(RzContext* ctx) {
     std::vector<uint32_t> texels(size_t(kFallbackSize) * kFallbackSize);
     for (int32_t y = 0; y < kFallbackSize; ++y) {
@@ -210,27 +210,27 @@ extern "C" {
 int32_t rzLoadObjectTexture(RzContext* ctx, int32_t id, const uint8_t* pcx, int32_t size) {
     if (!validId(ctx, id) || !pcx) return recordError(ctx, "rzLoadObjectTexture", RZ_ERR_INVALID_ARG);
     Object& o = ctx->objects[id];
-    releaseTexture(o);                       // em caso de erro: fallback
-    o.gpuDirty = true;                       // as cores sólidas: a paleta nova (ou a da fallback)
+    releaseTexture(o);                       // on an error: fallback
+    o.gpuDirty = true;                       // the solid colours: the new palette (or the fallback's)
     return recordError(ctx, "rzLoadObjectTexture",
                        loadSquareTextureFromPcx(pcx, size, &o.texture, o.palette, &o.textureGlass));
 }
 
 int32_t rzLoadFallbackTexture(RzContext* ctx, const uint8_t* pcx, int32_t size) {
     if (!ctx) return RZ_ERR_INVALID_ARG;
-    if (!pcx) return recordError(ctx, "rzLoadFallbackTexture", createFallbackTexture(ctx) ? RZ_OK : RZ_ERR_GL);   // volta ao xadrez
+    if (!pcx) return recordError(ctx, "rzLoadFallbackTexture", createFallbackTexture(ctx) ? RZ_OK : RZ_ERR_GL);   // back to the chequerboard
 
     GLuint texture;
     uint8_t palette[768];
     bool glass;
     const int32_t err = loadSquareTextureFromPcx(pcx, size, &texture, palette, &glass);
-    if (err != RZ_OK) return recordError(ctx, "rzLoadFallbackTexture", err);   // a fallback atual continua
+    if (err != RZ_OK) return recordError(ctx, "rzLoadFallbackTexture", err);   // the current fallback stays
     glDeleteTextures(1, &ctx->fallbackTex);
     ctx->fallbackTex = texture;
     std::memcpy(ctx->fallbackPalette, palette, sizeof(palette));
     ctx->hasFallbackPalette = true;
     ctx->fallbackGlass = glass;
-    markObjectsDirty(ctx);                   // as cores sólidas de quem usa a fallback
+    markObjectsDirty(ctx);                   // the solid colours of those using the fallback
     return RZ_OK;
 }
 

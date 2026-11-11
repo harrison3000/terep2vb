@@ -1,16 +1,16 @@
-// Câmera (modo em rzSetCamera), roda na CPU uma vez por frame e produz a
+// Camera (mode in rzSetCamera), runs on the CPU once per frame and makes the
 // view-projection:
-//   perseguição      vértice-alvo "na corda", olhando para ele (com a bolha);
-//   congelada        a posição da perseguição para onde está, ainda olhando
-//                    para o alvo;
-//   interna          no vértice-alvo, orientada pelos eixos do host
-//                    (rzSetCameraInternalAxes); vindo da perseguição entra
-//                    num voo suave, nos outros casos (e na saída) corte seco;
-//   visão geral      fixa, o terreno inteiro (também sem alvo);
-//   livre            onde o host mandar (rzSetCameraFree), sem alvo; corte
-//                    seco ao entrar, e ao sair as outras voam de onde ela
-//                    estava (como saindo da visão geral), menos a congelada,
-//                    que fica ali mesmo.
+//   chase            target vertex "on the rope", looking at it (with the bubble);
+//   frozen           the chase position stops where it is, still looking
+//                    at the target;
+//   internal         at the target vertex, oriented by the host's axes
+//                    (rzSetCameraInternalAxes); coming from the chase it goes
+//                    in with a smooth flight, otherwise (and going out) a hard cut;
+//   overview         fixed, the whole terrain (also with no target);
+//   free             wherever the host says (rzSetCameraFree), no target; a
+//                    hard cut going in, and going out the others fly from where
+//                    it was (as leaving the overview), but the frozen one,
+//                    which stays right there.
 
 #include <cmath>
 
@@ -20,11 +20,11 @@ namespace rz {
 
 namespace {
 
-// Zona morta, só no ângulo da câmera: uma bolha de raio kCameraBubbleRadius
-// em volta do alvo suavizado (look), que ele empurra por dentro. Enquanto o
-// alvo anda dentro dela, o centro não se mexe; se ele chega na parede, o
-// centro é arrastado o mínimo para mantê-lo na superfície. Devolve o centro
-// (para onde a câmera olha). A posição do olho não é afetada.
+// Dead zone, in the camera's angle only: a bubble of radius kCameraBubbleRadius
+// around the smoothed target (look), which it pushes from inside. While the
+// target moves inside it, the centre does not move; when it reaches the wall,
+// the centre is dragged the least to keep it on the surface. Returns the centre
+// (where the camera looks). The eye's position is not affected.
 Vec3 aimBubble(RzContext* ctx, Vec3 look) {
     if (!ctx->aimValid) {
         ctx->aimPoint = look;
@@ -41,13 +41,13 @@ Vec3 aimBubble(RzContext* ctx, Vec3 look) {
     return ctx->aimPoint;
 }
 
-// Altura do terreno (mundo) no ponto (x, z) do mundo, bilinear; 0 sem terreno.
-// Com a continuação montada, vale também fora do mapa (câmera atrás do alvo
-// perto da borda).
+// The terrain's height (world) at the world's point (x, z), bilinear; 0 without terrain.
+// With the continuation built, it also counts outside the map (camera behind the
+// target near the border).
 float groundHeight(const RzContext* ctx, float x, float z) {
     if (!ctx->hasTerrain()) return 0.0f;
     if (!ctx->extHeights.empty()) return extendedGroundHeight(ctx, x, z);
-    const float invCell = 1.0f / ctx->cellSize;      // uma divisão por frame
+    const float invCell = 1.0f / ctx->cellSize;      // one division per frame
     float gx = x * invCell, gz = z * invCell;
     if (gx < 0.0f) gx = 0.0f;
     if (gz < 0.0f) gz = 0.0f;
@@ -61,12 +61,12 @@ float groundHeight(const RzContext* ctx, float x, float z) {
     return (top + (bot - top) * fz) * ctx->heightScale;
 }
 
-// Bolha do olho contra o terreno: o chão não entra numa esfera de raio
-// kTerrainBubble em volta dele. Amostra o chão no centro e em dois anéis de 8
-// direções (metade do raio e o raio); em cada ponto, a distância horizontal d
-// pede o olho pelo menos sqrt(R² - d²) acima do chão ali. Só empurra para
-// cima (o terreno é um mapa de alturas: subir sempre resolve). Contínua: o
-// máximo de funções contínuas, sem saltos quando o olho anda.
+// The eye's bubble against the terrain: the ground does not get into a sphere
+// of radius kTerrainBubble around it. Samples the ground at the centre and on
+// two rings of 8 directions (half the radius and the radius); at each point,
+// the horizontal distance d asks the eye to be at least sqrt(R² - d²) over the
+// ground there. Only pushes up (the terrain is a height map: going up always
+// works). Continuous: the maximum of continuous functions, no jumps as the eye moves.
 Vec3 terrainBubble(const RzContext* ctx, Vec3 eye) {
     const float r = kTerrainBubble * ctx->cellSize;
     float need = groundHeight(ctx, eye.x, eye.z) + r;
@@ -82,14 +82,14 @@ Vec3 terrainBubble(const RzContext* ctx, Vec3 eye) {
     return eye;
 }
 
-// Câmera "na corda": avança o estado da câmera de perseguição um passo de
-// `frames` frames de 60 Hz (os amortecimentos por stepFraction).
-//   - horizontal: se o alvo passa do comprimento da corda, a câmera é puxada
-//     até a distância da corda (fica para trás, na direção de onde veio); se
-//     chega perto demais, recua. Entre os dois, a corda está frouxa e a câmera
-//     não se mexe. O movimento até a posição desejada é amortecido.
-//   - vertical: busca ficar `followHeight` acima do alvo, também amortecida, e
-//     nunca abaixo do chão.
+// Camera "on the rope": moves the chase camera's state on a step of `frames`
+// frames of 60 Hz (the dampings by stepFraction).
+//   - horizontal: if the target goes past the rope's length, the camera is
+//     pulled to the rope's distance (stays behind, in the direction it came
+//     from); if it gets too near, it backs away. In between, the rope is slack
+//     and the camera does not move. The movement to the wanted position is damped.
+//   - vertical: tries to be `followHeight` over the target, also damped, and
+//     never under the ground.
 void updateFollowCamera(RzContext* ctx, Vec3 target, float frames) {
     const float cs = ctx->cellSize;
     const float rope = ctx->followDistance * cs;
@@ -97,8 +97,8 @@ void updateFollowCamera(RzContext* ctx, Vec3 target, float frames) {
     const float k = stepFraction(ctx->followStiffness, frames);
 
     if (!ctx->followInitialized) {
-        // Começa no lado +z do alvo (o mesmo da visão geral), já na posição
-        // de repouso; quando o alvo andar, a corda leva a câmera para trás dele.
+        // Starts on the target's +z side (the same as the overview's), already at
+        // rest; when the target moves, the rope takes the camera behind it.
         ctx->followEye = { target.x, target.y + ctx->followHeight * cs, target.z + rope };
         ctx->followInitialized = true;
         ctx->followAppliedDistance = ctx->followDistance;
@@ -106,9 +106,9 @@ void updateFollowCamera(RzContext* ctx, Vec3 target, float frames) {
 
     Vec3 eye = ctx->followEye;
 
-    // Corda mudou de comprimento (zoom do host): a distância horizontal atual
-    // muda na mesma proporção, na hora. Sem isso, a câmera só reagiria quando
-    // o alvo saísse da faixa frouxa da corda.
+    // The rope changed length (the host's zoom): the current horizontal distance
+    // changes in the same proportion, at once. Without this, the camera would only
+    // react when the target left the rope's slack band.
     if (ctx->followAppliedDistance != ctx->followDistance) {
         const float scale = ctx->followDistance / ctx->followAppliedDistance;
         eye.x = target.x + (eye.x - target.x) * scale;
@@ -128,16 +128,16 @@ void updateFollowCamera(RzContext* ctx, Vec3 target, float frames) {
             wantX = target.x + dx * scale;
             wantZ = target.z + dz * scale;
         } else {
-            wantX = target.x + len;                    // em cima do alvo: sai para +x
+            wantX = target.x + len;                    // on top of the target: out towards +x
             wantZ = target.z;
         }
     }
     eye.x += (wantX - eye.x) * k;
     eye.z += (wantZ - eye.z) * k;
 
-    // Altura: a desejada nunca fica a menos de kFollowClearance do chão. Subir
-    // é amortecido mais rápido que descer, para não entrar no morro; o clamp
-    // duro (kFollowMinClearance) é só uma rede de segurança.
+    // Height: the wanted one is never less than kFollowClearance over the ground.
+    // Going up is damped faster than going down, not to get into the hill; the hard
+    // clamp (kFollowMinClearance) is only a safety net.
     const float ground = groundHeight(ctx, eye.x, eye.z);
     float wantY = target.y + ctx->followHeight * cs;
     if (wantY < ground + kFollowClearance * cs) wantY = ground + kFollowClearance * cs;
@@ -152,15 +152,15 @@ Vec3 lerp3(Vec3 a, Vec3 b, float t) {
     return { a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t };
 }
 
-// Posição de repouso atrás do alvo, na direção do voo (o alvo fica à frente).
+// Rest position behind the target, in the flight's direction (the target ahead).
 Vec3 restEye(const RzContext* ctx, Vec3 target, Vec3 dir) {
     const float cs = ctx->cellSize;
     const float rope = ctx->followDistance * cs;
     return { target.x - dir.x * rope, target.y + ctx->followHeight * cs, target.z - dir.z * rope };
 }
 
-// Troca de alvo: monta a transição a partir do olho e do ponto olhado atuais
-// (também no meio de outra transição).
+// Change of target: sets up the transition from the current eye and point
+// looked at (also in the middle of another transition).
 void startRetarget(RzContext* ctx, Vec3 target) {
     const float cs = ctx->cellSize;
     ctx->retargetPending = false;
@@ -182,7 +182,7 @@ void startRetarget(RzContext* ctx, Vec3 target) {
     float lift = d / kRetargetArcFull;
     if (lift > 1.0f) lift = 1.0f;
     ctx->retargetLift = lift * kRetargetArcHeight * cs;
-    // smoothstep tem pico de velocidade 1,5x a média; o arco soma ~2x a subida
+    // smoothstep peaks at 1.5x the average speed; the arc adds ~2x the rise
     const Vec3 move = restEye(ctx, target, ctx->retargetDir) - ctx->followEye;
     const float path = sqrtf(dot(move, move)) + 2.0f * ctx->retargetLift;
     float frames = 1.5f * path / (kRetargetMaxSpeed * cs);
@@ -190,7 +190,7 @@ void startRetarget(RzContext* ctx, Vec3 target) {
     ctx->retargetStep = 1.0f / frames;
 }
 
-// Um frame da transição. O destino acompanha o alvo (ele pode estar andando).
+// A frame of the transition. The destination follows the target (it may be moving).
 void updateRetarget(RzContext* ctx, Vec3 target) {
     float t = ctx->retargetT + ctx->retargetStep * ctx->frameStep;
     if (t > 1.0f) t = 1.0f;
@@ -199,10 +199,10 @@ void updateRetarget(RzContext* ctx, Vec3 target) {
 
     if (!ctx->retargetArc) {
         ctx->followLook = lerp3(ctx->retargetLook0, target, e);
-        updateFollowCamera(ctx, ctx->followLook, ctx->frameStep); // a corda traz a câmera
+        updateFollowCamera(ctx, ctx->followLook, ctx->frameStep); // the rope brings the camera
     } else {
-        // O olhar vai na frente do olho (chega no alvo com 2/3 do voo): no alto
-        // do arco a câmera olha adiante e para baixo, não para o próprio pé
+        // The look goes ahead of the eye (reaches the target at 2/3 of the flight): at
+        // the top of the arc the camera looks ahead and down, not at its own feet
         float tl = t * 1.5f;
         if (tl > 1.0f) tl = 1.0f;
         ctx->followLook = lerp3(ctx->retargetLook0, target, tl * tl * (3.0f - 2.0f * tl));
@@ -213,7 +213,7 @@ void updateRetarget(RzContext* ctx, Vec3 target) {
         if (eye.y < floorY) eye.y = floorY;
         ctx->followEye = eye;
     }
-    if (t >= 1.0f) ctx->retargetActive = false;                 // segue na corda normal
+    if (t >= 1.0f) ctx->retargetActive = false;                 // on the normal rope again
 }
 
 float smooth01(float t) {
@@ -222,8 +222,8 @@ float smooth01(float t) {
     return t * t * (3.0f - 2.0f * t);
 }
 
-// Avança a transição de/para a visão geral um frame; devolve o progresso
-// suavizado e o cru (t) em *rawT.
+// Moves the transition to/from the overview on a frame; returns the smoothed
+// progress and the raw one (t) in *rawT.
 float stepOverview(RzContext* ctx, float* rawT) {
     float t = ctx->overviewT + ctx->frameStep / kOverviewFrames;
     if (t >= 1.0f) {
@@ -235,8 +235,8 @@ float stepOverview(RzContext* ctx, float* rawT) {
     return smooth01(t);
 }
 
-// Projeção perspectiva no clip space do WebGL (−w ≤ z ≤ w), câmera olhando
-// para −z.
+// Perspective projection in WebGL's clip space (−w ≤ z ≤ w), the camera looking
+// towards −z.
 Mat4 perspective(float focalX, float focalY, float nearPlane, float farPlane) {
     const float invRange = 1.0f / (nearPlane - farPlane);
     Mat4 p{};
@@ -248,13 +248,13 @@ Mat4 perspective(float focalX, float focalY, float nearPlane, float farPlane) {
     return p;
 }
 
-// Visão geral: olha para o centro do terreno do lado +z, com inclinação
-// fixa, na distância em que a esfera envolvente (raio R) cabe no FOV.
+// Overview: looks at the terrain's centre from the +z side, with a fixed
+// pitch, at the distance at which the bounding sphere (radius R) fits the FOV.
 void overviewCamera(const RzContext* ctx, Vec3 center, Vec3* eye) {
     constexpr float degToRad = kPi / 180.0f;
     const float pitch = kOverviewPitchDegrees * degToRad;
-    // focal = 1 / tan(meio FOV), no eixo de FOV menor: a esfera fica quase
-    // tangente às bordas e os cantos da caixa (mais baixa que a esfera) cabem
+    // focal = 1 / tan(half FOV), on the axis of the smaller FOV: the sphere is
+    // nearly tangent to the edges and the box's corners (lower than the sphere) fit
     const float focal = ctx->focalX > ctx->focalY ? ctx->focalX : ctx->focalY;
     const float d = ctx->terrainRadius * focal;
     *eye = center + Vec3{ 0.0f, sinf(pitch) * d, cosf(pitch) * d };
@@ -262,8 +262,8 @@ void overviewCamera(const RzContext* ctx, Vec3 center, Vec3* eye) {
 
 } // namespace
 
-// Avança a câmera um frame e devolve a matriz view-projection, já na
-// convenção do WebGL.
+// Moves the camera on a frame and returns the view-projection matrix, already in
+// WebGL's convention.
 Mat4 updateCamera(RzContext* ctx) {
     const float cs = ctx->cellSize;
     const float hs = ctx->heightScale;
@@ -276,14 +276,14 @@ Mat4 updateCamera(RzContext* ctx) {
     const bool freeCam = ctx->cameraMode == RZ_CAMERA_FREE && ctx->freeValid;
     const int32_t mode = freeCam ? RZ_CAMERA_FREE
                        : hasTarget && ctx->cameraMode != RZ_CAMERA_FREE ? ctx->cameraMode : RZ_CAMERA_OVERVIEW;
-    const bool following = mode != RZ_CAMERA_OVERVIEW && !freeCam;    // perseguição, congelada ou interna
+    const bool following = mode != RZ_CAMERA_OVERVIEW && !freeCam;    // chase, frozen or internal
     const bool internal  = mode == RZ_CAMERA_INTERNAL;
 
     Vec3 eye, at;
-    Vec3 up = { 0.0f, 1.0f, 0.0f };                       // "cima" da câmera (a interna inclina)
+    Vec3 up = { 0.0f, 1.0f, 0.0f };                       // the camera's "up" (the internal one tilts)
     if (freeCam) {
-        // Sem transições nem estado: a perseguição recomeça do zero na volta
-        // (camLastFollowing falso: voa daqui até atrás do alvo)
+        // No transitions nor state: the chase starts afresh on the way back
+        // (camLastFollowing false: it flies from here to behind the target)
         eye = ctx->freeEye;
         at = eye + Vec3{ ctx->freeForward.x * cs, ctx->freeForward.y * cs, ctx->freeForward.z * cs };
         ctx->targetPos = eye;
@@ -293,8 +293,8 @@ Mat4 updateCamera(RzContext* ctx) {
         ctx->overviewActive = false;
         ctx->overviewBlend = 0.0f;
     } else if (internal) {
-        // Corte seco: sem transições. A perseguição fica pronta atrás do alvo
-        // (pela frente da câmera interna), para a volta também ser um corte.
+        // Hard cut: no transitions. The chase is kept ready behind the target
+        // (by the internal camera's front), so that going back is a cut too.
         const Vec3 raw = ctx->objects[target].world[ctx->cameraTargetVertex];
         ctx->targetPos = raw;
         ctx->retargetPending = ctx->retargetActive = false;
@@ -303,14 +303,14 @@ Mat4 updateCamera(RzContext* ctx) {
         Vec3 forward = ctx->internalForward;
         if (ctx->internalValid) {
             up = ctx->internalUp;
-        } else {                                          // sem eixos ainda: olha para onde a perseguição olhava
+        } else {                                          // no axes yet: looks where the chase looked
             Vec3 d = raw - ctx->camLastEye;
             d.y = 0.0f;
             const float l = sqrtf(dot(d, d));
             forward = l > 1e-4f ? Vec3{ d.x / l, 0.0f, d.z / l } : Vec3{ 0.0f, 0.0f, -1.0f };
         }
-        // Vindo da perseguição/congelada: voa do olho atual até o vértice,
-        // girando da orientação atual para a dos eixos (corte seco nos outros casos)
+        // Coming from the chase/frozen: flies from the current eye to the vertex,
+        // turning from the current orientation to the axes' (a hard cut otherwise)
         if (ctx->camHasLast && ctx->camLastMode != RZ_CAMERA_INTERNAL) {
             ctx->internalEnterActive = ctx->camLastMode != RZ_CAMERA_OVERVIEW;
             ctx->internalEnterT = 0.0f;
@@ -320,7 +320,7 @@ Mat4 updateCamera(RzContext* ctx) {
         }
         eye = raw;
         if (ctx->internalEnterActive) {
-            // frente e cima interpolados; o lookAt ortonormaliza
+            // front and up interpolated; lookAt makes them orthonormal
             float t = ctx->internalEnterT + ctx->frameStep / kInternalEnterFrames;
             if (t >= 1.0f) { t = 1.0f; ctx->internalEnterActive = false; }
             ctx->internalEnterT = t;
@@ -340,15 +340,15 @@ Mat4 updateCamera(RzContext* ctx) {
         ctx->followAppliedDistance = ctx->followDistance;
         ctx->aimValid = false;
     } else if (following) {
-        // Perseguição: câmera na corda, olhando para o vértice-alvo suavizado
-        // (o mesmo ponto puxa a corda, então a altura da câmera também não treme)
+        // Chase: camera on the rope, looking at the smoothed target vertex
+        // (the same point pulls the rope, so the camera's height does not shake either)
         const Vec3 raw = ctx->objects[target].world[ctx->cameraTargetVertex];
         ctx->targetPos = raw;
         if (!ctx->followInitialized) {
             ctx->retargetPending = ctx->retargetActive = false;
             if (ctx->camHasLast && ctx->camLastMode == RZ_CAMERA_FREE && mode == RZ_CAMERA_FOLLOW_FREEZE) {
-                // Da livre para a congelada: fica onde a livre estava (o host
-                // escolhe o lugar dela voando), já olhando para o alvo
+                // From the free one to the frozen one: stays where the free one was (the
+                // host picks its place by flying), already looking at the target
                 ctx->followEye = ctx->camLastEye;
                 ctx->followLook = raw;
                 ctx->followLastRaw = raw;
@@ -357,8 +357,8 @@ Mat4 updateCamera(RzContext* ctx) {
                 ctx->overviewActive = false;
                 ctx->overviewBlend = 0.0f;
             } else if (ctx->camHasLast && !ctx->camLastFollowing) {
-                // Saindo da visão geral (ou do meio da ida para ela): voa de
-                // onde a câmera está até atrás do alvo
+                // Leaving the overview (or halfway into it): flies from where the
+                // camera is to behind the target
                 ctx->overviewActive = true;
                 ctx->overviewToward = false;
                 ctx->overviewT = 0.0f;
@@ -377,7 +377,7 @@ Mat4 updateCamera(RzContext* ctx) {
             }
         }
         if (ctx->retargetPending) {
-            ctx->overviewActive = false;               // outro alvo no meio: voo normal
+            ctx->overviewActive = false;               // another target in the middle: normal flight
             startRetarget(ctx, raw);
         }
         if (ctx->overviewActive) {
@@ -385,13 +385,13 @@ Mat4 updateCamera(RzContext* ctx) {
             const float e = stepOverview(ctx, &t);
             Vec3 rest = restEye(ctx, raw, ctx->overviewDir);
             Vec3 eye = lerp3(ctx->overviewEye0, rest, e);
-            // desce só na segunda metade: sobre o caminho, a câmera fica alta
+            // comes down only in the second half: over the way, the camera stays high
             eye.y = ctx->overviewEye0.y + (rest.y - ctx->overviewEye0.y) * smooth01(2.0f * t - 1.0f);
             const float floorY = groundHeight(ctx, eye.x, eye.z) + kFollowClearance * cs;
             if (eye.y < floorY) eye.y = floorY;
             ctx->followEye = eye;
             ctx->followLook = lerp3(ctx->overviewLook0, raw, smooth01(1.5f * t));
-            ctx->overviewBlend = ctx->overviewBlend0 * (1.0f - smooth01(2.0f * t - 1.0f));   // junto com a descida
+            ctx->overviewBlend = ctx->overviewBlend0 * (1.0f - smooth01(2.0f * t - 1.0f));   // together with the descent
         } else if (ctx->retargetActive) {
             updateRetarget(ctx, raw);
         } else {
@@ -400,10 +400,10 @@ Mat4 updateCamera(RzContext* ctx) {
                 ctx->followLook = raw;
                 ctx->followLastRaw = raw;
             }
-            // Em passos de até um frame de 60 Hz, com o alvo andando da
-            // posição do frame anterior até a de agora: com a taxa de quadros
-            // baixa, a corda e o olhar ficam como a 60 Hz (num passo só, um
-            // alvo rápido abriria distância antes de a corda puxar)
+            // In steps of up to a frame of 60 Hz, with the target moving from the
+            // previous frame's position to the current one: at a low frame rate, the
+            // rope and the look stay as at 60 Hz (in a single step, a fast target
+            // would open a gap before the rope pulls)
             const int32_t steps = ctx->frameStep > 1.0f ? int32_t(ceilf(ctx->frameStep)) : 1;
             const float frames = ctx->frameStep / float(steps);
             const float kXZ = stepFraction(kFollowLookXZ, frames), kY = stepFraction(kFollowLookY, frames);
@@ -413,24 +413,24 @@ Mat4 updateCamera(RzContext* ctx) {
                 look.x += (r.x - look.x) * kXZ;
                 look.z += (r.z - look.z) * kXZ;
                 look.y += (r.y - look.y) * kY;
-                if (!frozen) updateFollowCamera(ctx, look, frames);   // congelada: o olho fica onde está
+                if (!frozen) updateFollowCamera(ctx, look, frames);   // frozen: the eye stays where it is
             }
         }
         if (!ctx->overviewActive && ctx->overviewBlend > 0.0f) {
-            // transição interrompida por outro alvo: a neblina termina sozinha
+            // transition interrupted by another target: the fog ends by itself
             ctx->overviewBlend -= ctx->frameStep / kOverviewFrames;
             if (ctx->overviewBlend < 0.0f) ctx->overviewBlend = 0.0f;
         }
         ctx->followLastRaw = raw;
-        if (mode != RZ_CAMERA_FOLLOW_FREEZE)                   // (a congelada fica onde foi posta)
-            ctx->followEye = terrainBubble(ctx, ctx->followEye);   // a bolha: o chão não chega perto
+        if (mode != RZ_CAMERA_FOLLOW_FREEZE)                   // (the frozen one stays where it was put)
+            ctx->followEye = terrainBubble(ctx, ctx->followEye);   // the bubble: the ground does not come near
         eye = ctx->followEye;
         if (ctx->overviewActive || ctx->retargetActive || mode == RZ_CAMERA_FOLLOW_FREEZE) {
             at = ctx->followLook;
-            ctx->aimValid = false;                     // transições e congelada: olha direto para o alvo
+            ctx->aimValid = false;                     // transitions and frozen: looks straight at the target
         } else {
-            // Zona morta no ângulo (manobras lentas, indo e voltando, não
-            // balançam a câmera); a corda continua seguindo o alvo
+            // Dead zone in the angle (slow manoeuvres, back and forth, do not
+            // rock the camera); the rope goes on following the target
             at = aimBubble(ctx, ctx->followLook);
         }
     } else {
@@ -440,7 +440,7 @@ Mat4 updateCamera(RzContext* ctx) {
         Vec3 ovEye;
         overviewCamera(ctx, terrainCenter, &ovEye);
         if (ctx->camHasLast && ctx->camLastFollowing) {
-            // Indo para a visão geral (ou do meio da saída dela)
+            // Going to the overview (or halfway out of it)
             ctx->overviewActive = true;
             ctx->overviewToward = true;
             ctx->overviewT = 0.0f;
@@ -454,12 +454,12 @@ Mat4 updateCamera(RzContext* ctx) {
             float t;
             const float e = stepOverview(ctx, &t);
             eye = lerp3(ctx->overviewEye0, ovEye, e);
-            // sobe já na primeira metade, para não atravessar morro
+            // rises already in the first half, not to go through a hill
             eye.y = ctx->overviewEye0.y + (ovEye.y - ctx->overviewEye0.y) * smooth01(2.0f * t);
             const float floorY = groundHeight(ctx, eye.x, eye.z) + kFollowClearance * cs;
             if (eye.y < floorY) eye.y = floorY;
             at = lerp3(ctx->overviewLook0, terrainCenter, e);
-            ctx->overviewBlend = ctx->overviewBlend0 + (1.0f - ctx->overviewBlend0) * smooth01(2.0f * t);   // junto com a subida
+            ctx->overviewBlend = ctx->overviewBlend0 + (1.0f - ctx->overviewBlend0) * smooth01(2.0f * t);   // together with the rise
         } else {
             ctx->overviewActive = false;
             eye = ovEye;
@@ -474,14 +474,14 @@ Mat4 updateCamera(RzContext* ctx) {
     ctx->camLastEye = eye;
     ctx->camLastLook = at;
 
-    // Neblina: seguindo, em volta do olho (rzSetFog); na visão geral, em volta
-    // do centro do mapa, só depois do terreno (esconde o fim da continuação).
-    // Na transição, origem e distâncias são interpoladas. Sombras: cascatas
-    // seguindo, mapa do terreno inteiro na visão geral (troca no meio).
+    // Fog: following, around the eye (rzSetFog); in the overview, around the
+    // map's centre, only past the terrain (hides the end of the continuation).
+    // In the transition, origin and distances are interpolated. Shadows: cascades
+    // following, the whole terrain's map in the overview (changing halfway).
     const float b = ctx->overviewBlend;
     const float ovNear = ctx->terrainRadius, ovFar = ctx->terrainRadius + kOverviewFogDepth * cs;
     ctx->eyePos = eye;
-    ctx->fogOn  = following || ctx->overviewActive || ctx->hasTerrain();   // sem terreno, a visão geral não tem o que esconder
+    ctx->fogOn  = following || ctx->overviewActive || ctx->hasTerrain();   // without terrain, the overview has nothing to hide
     ctx->fogOrigin = lerp3(eye, terrainCenter, b);
     ctx->fogNear = ctx->fogStart * cs + (ovNear - ctx->fogStart * cs) * b;
     ctx->fogFar  = ctx->fogEnd * cs + (ovFar - ctx->fogEnd * cs) * b;
@@ -495,18 +495,18 @@ Mat4 updateCamera(RzContext* ctx) {
     const Vec3 toAt = at - eye;
     const float focusDist = sqrtf(dot(toAt, toAt));
 
-    // near/far: o terreno inteiro (esfera de raio R) e o ponto observado ficam
-    // dentro do frustum em profundidade.
+    // near/far: the whole terrain (sphere of radius R) and the point looked at stay
+    // inside the frustum in depth.
     const Vec3 toTerrain = eye - terrainCenter;
     const float terrainDist = sqrtf(dot(toTerrain, toTerrain));
     const float radius = ctx->terrainRadius;
     float nearPlane = terrainDist - radius;
     if (nearPlane > 0.5f * focusDist) nearPlane = 0.5f * focusDist;
-    if (nearPlane < 0.002f * radius) nearPlane = 0.002f * radius;   // ~0,36 tile: chão perto da câmera
-    if (internal) nearPlane = kInternalNear * cs;                   // dentro do objeto: o painel fica perto
-    if (freeCam && nearPlane > kFreeNear * cs) nearPlane = kFreeNear * cs;   // rente ao chão: ele fica perto
+    if (nearPlane < 0.002f * radius) nearPlane = 0.002f * radius;   // ~0.36 tile: the ground near the camera
+    if (internal) nearPlane = kInternalNear * cs;                   // inside the object: the dashboard is near
+    if (freeCam && nearPlane > kFreeNear * cs) nearPlane = kFreeNear * cs;   // close to the ground: it is near
     float farPlane = terrainDist + radius;
-    // Com neblina, nada além do fim dela aparece: o far encosta nele (melhor precisão)
+    // With fog, nothing past its end shows: the far plane goes up to it (better precision)
     const Vec3 toFog = ctx->fogOrigin - eye;
     const float fogFar = (sqrtf(dot(toFog, toFog)) + ctx->fogFar) * 1.02f;
     if (farPlane > fogFar) farPlane = fogFar;
@@ -517,9 +517,9 @@ Mat4 updateCamera(RzContext* ctx) {
     return perspective(ctx->focalX, ctx->focalY, nearPlane, farPlane) * view;
 }
 
-// Matriz de view olhando de `eye` para `at`, com `up` (não precisa ser
-// unitário nem perpendicular) para cima (sistema destro, câmera olhando para
-// −z no espaço de view).
+// View matrix looking from `eye` to `at`, with `up` (need be neither unit nor
+// perpendicular) upwards (right-handed system, the camera looking towards
+// −z in view space).
 Mat4 lookAt(Vec3 eye, Vec3 at, Vec3 up) {
     Vec3 f = at - eye;
     const float invF = 1.0f / sqrtf(dot(f, f));

@@ -1,31 +1,31 @@
-// Borda do mundo: "continuação" do terreno além das extremidades do mapa e a
-// parede de limite da área jogável.
+// The world's edge: the terrain's "continuation" past the ends of the map and
+// the boundary wall of the playable area.
 //
-// Continuação: até kSkirtExtent tiles além de cada borda (o alcance da
-// neblina + folga), gerada na carga a partir do próprio mapa:
-//   - altura: parte da altura da borda (o ponto mais próximo do mapa) e, ao
-//     longo de kSkirtBlend tiles, vai para (média das bordas + ruído de valor
-//     em duas oitavas). Na emenda com o mapa, a altura é a da borda: sem degrau.
-//   - bloco de textura: em geral continua o da borda logo "na frente", com o
-//     ponto de cópia serpenteando ao longo da borda (rios continuam como
-//     faixas que fazem curvas); uma parte das células sorteia um bloco perto
-//     da borda (skirtTile).
-//   - malha em faixas (kSkirtBands): células de 1 tile até 8 tiles da borda,
-//     de 2 até 16, de 4 até 32 e de 16 até kSkirtExtent (128); longe, a
-//     neblina cobre. Nas linhas onde duas faixas se encontram, as alturas dos
-//     pontos intermediários são interpoladas, para não abrir frestas
+// Continuation: up to kSkirtExtent tiles past each border (the fog's reach +
+// slack), generated at loading from the map itself:
+//   - height: starts from the border's height (the nearest point of the map)
+//     and, over kSkirtBlend tiles, goes to (average of the borders + value
+//     noise in two octaves). Where it meets the map, the height is the border's: no step.
+//   - texture block: mostly continues that of the border right "in front",
+//     with the copy point meandering along the border (rivers go on as
+//     bands that curve); a share of the cells draws a block near the
+//     border by lot (skirtTile).
+//   - mesh in bands (kSkirtBands): cells of 1 tile up to 8 tiles from the
+//     border, of 2 up to 16, of 4 up to 32 and of 16 up to kSkirtExtent (128); far
+//     away, the fog covers it. On the lines where two bands meet, the heights
+//     of the points in between are interpolated, so as not to open cracks
 //     (T-junctions).
-//   - só é desenhada seguindo um alvo (com neblina); projeta sombra no mapa 0.
-//   - groundHeight (câmera) usa as mesmas alturas, com a mesma resolução.
+//   - only drawn following a target (with fog); casts a shadow in map 0.
+//   - groundHeight (camera) uses the same heights, at the same resolution.
 //
-// Parede: em cima das quatro bordas do mapa, do chão até kBorderWallHeight
-// tiles acima, vermelha translúcida, com círculos vermelhos de borda branca
-// e um X vazado no meio (um por célula de kBorderXSize tiles), num padrão
-// preso ao mundo (ao longo da parede e na altura do mundo: a parede sobe e
-// desce com o terreno, o desenho não). Só
-// aparece perto do alvo da câmera: alfa = 1 - smoothstep(near, far, distância
-// horizontal do alvo ao ponto da parede). Desenhada depois do opaco, com
-// blending e sem gravar profundidade; não projeta nem recebe sombra.
+// Wall: on the map's four borders, from the ground up to kBorderWallHeight
+// tiles above, translucent red, with red circles with a white border and a
+// hollow X in the middle (one per cell of kBorderXSize tiles), in a pattern
+// fixed to the world (along the wall and at the world's height: the wall goes
+// up and down with the terrain, the pattern does not). It only
+// shows near the camera's target: alpha = 1 - smoothstep(near, far, horizontal
+// distance from the target to the wall's point). Drawn after the opaque, with
+// blending and without writing depth; it neither casts nor receives a shadow.
 
 #include <cmath>
 
@@ -35,14 +35,14 @@ namespace rz {
 
 namespace {
 
-constexpr int32_t kExtLo  = -kSkirtExtent;                           // -128 (origem das grades)
+constexpr int32_t kExtLo  = -kSkirtExtent;                           // -128 (the grids' origin)
 constexpr int32_t kExtHi  = kQuadsPerSide + kSkirtExtent + 1;        // 384
-constexpr int32_t kExtSide = kExtHi - kExtLo + 1;                    // pontos por lado (513)
-// Contorno da faixa i: de bandLo(i) a bandHi(i) nos dois eixos
+constexpr int32_t kExtSide = kExtHi - kExtLo + 1;                    // points per side (513)
+// Outline of band i: from bandLo(i) to bandHi(i) on both axes
 constexpr int32_t bandLo(int32_t i) { return -kSkirtBands[i].limit; }
 constexpr int32_t bandHi(int32_t i) { return kQuadsPerSide + kSkirtBands[i].limit + 1; }
-// grades alinhadas a kExtLo; o contorno de cada faixa fecha em células
-// inteiras dela e da de fora; passos crescentes e múltiplos
+// grids aligned to kExtLo; each band's outline closes on whole cells of
+// it and of the outer one; growing steps, each a multiple of the previous
 constexpr bool bandsAligned() {
     for (int32_t i = 0; i < kSkirtBandCount; ++i) {
         const int32_t s = kSkirtBands[i].step;
@@ -53,11 +53,11 @@ constexpr bool bandsAligned() {
     }
     return kSkirtBands[0].step == 1;
 }
-static_assert(bandsAligned(), "faixas da continuação desalinhadas");
+static_assert(bandsAligned(), "the continuation's bands are misaligned");
 
 struct WallVertex {
     float x, y, z;
-    float u, v;            // tiles ao longo da parede / acima da base
+    float u, v;            // tiles along the wall / above the base
 };
 
 uint32_t hash2(int32_t x, int32_t y, uint32_t seed) {
@@ -66,7 +66,7 @@ uint32_t hash2(int32_t x, int32_t y, uint32_t seed) {
     return h ^ (h >> 16);
 }
 
-// Ruído de valor (bilinear suavizado), 0..1
+// Value noise (smoothed bilinear), 0..1
 float valueNoise(float x, float y, int32_t period, uint32_t seed) {
     const float fx = x / float(period), fy = y / float(period);
     const float x0f = floorf(fx), y0f = floorf(fy);
@@ -83,12 +83,12 @@ float& ext(RzContext* ctx, int32_t gx, int32_t gz) {
     return ctx->extHeights[size_t(gz + kSkirtExtent) * kExtSide + size_t(gx + kSkirtExtent)];
 }
 
-// Alturas (unidade do byte, float) de -kSkirtExtent a 255 + kSkirtExtent + 1
+// Heights (unit of the byte, float) from -kSkirtExtent to 255 + kSkirtExtent + 1
 void buildExtendedHeights(RzContext* ctx) {
     ctx->extHeights.assign(size_t(kExtSide) * kExtSide, 0.0f);
     const uint8_t* h = ctx->heights.data();
 
-    // Altura base: média das bordas
+    // Base height: average of the borders
     float sum = 0.0f;
     for (int32_t i = 0; i < kGridSize; ++i) {
         sum += float(h[i]) + float(h[kQuadsPerSide * kGridSize + i])
@@ -96,12 +96,12 @@ void buildExtendedHeights(RzContext* ctx) {
     }
     const float base = sum / float(4 * kGridSize);
 
-    for (int32_t gz = kExtLo; gz <= kExtHi; ++gz) {            // kExtHi: canto de fora da última célula
+    for (int32_t gz = kExtLo; gz <= kExtHi; ++gz) {            // kExtHi: the outer corner of the last cell
         for (int32_t gx = kExtLo; gx <= kExtHi; ++gx) {
             const int32_t cx = gx < 0 ? 0 : (gx > kQuadsPerSide ? kQuadsPerSide : gx);
             const int32_t cz = gz < 0 ? 0 : (gz > kQuadsPerSide ? kQuadsPerSide : gz);
             const float edge = float(h[cz * kGridSize + cx]);
-            if (cx == gx && cz == gz) {               // dentro do mapa
+            if (cx == gx && cz == gz) {               // inside the map
                 ext(ctx, gx, gz) = edge;
                 continue;
             }
@@ -119,9 +119,9 @@ void buildExtendedHeights(RzContext* ctx) {
         }
     }
 
-    // Emendas entre faixas: nas linhas do contorno de uma faixa (lo..hi), os
-    // pontos entre os cantos das células da faixa de fora (passo step) ficam
-    // na reta entre eles (sem frestas)
+    // Seams between bands: on the lines of a band's outline (lo..hi), the
+    // points between the corners of the outer band's cells (step) lie
+    // on the straight line between them (no cracks)
     auto fixLine = [&](bool alongX, int32_t fixed, int32_t lo, int32_t hi, int32_t step) {
         for (int32_t s = lo; s < hi; s += step) {
             const float a = alongX ? ext(ctx, s, fixed) : ext(ctx, fixed, s);
@@ -136,17 +136,17 @@ void buildExtendedHeights(RzContext* ctx) {
         fixLine(true, lo, lo, hi, step);  fixLine(true, hi, lo, hi, step);
         fixLine(false, lo, lo, hi, step); fixLine(false, hi, lo, hi, step);
     };
-    for (int32_t i = 0; i + 1 < kSkirtBandCount; ++i)     // faixa i / faixa i+1
+    for (int32_t i = 0; i + 1 < kSkirtBandCount; ++i)     // band i / band i+1
         fixRing(bandLo(i), bandHi(i), kSkirtBands[i + 1].step);
 }
 
 
-// Uma célula (c, r)-(c+s, r+s): dois triângulos com a diagonal do mapa
+// A cell (c, r)-(c+s, r+s): two triangles with the map's diagonal
 void emitCell(const RzContext* ctx, std::vector<TerrainVertex>& out, const uint32_t* palette,
               int32_t c, int32_t r, int32_t s, uint8_t layer) {
     const float cs = ctx->cellSize, hs = ctx->heightScale;
     struct Corner { int32_t dc, dr; };
-    constexpr Corner kCorners[2][3] = { { { 0, 0 }, { 0, 1 }, { 1, 0 } },     // mesma do mapa (1 3 2, 2 3 4)
+    constexpr Corner kCorners[2][3] = { { { 0, 0 }, { 0, 1 }, { 1, 0 } },     // the same as the map's (1 3 2, 2 3 4)
                                         { { 1, 0 }, { 0, 1 }, { 1, 1 } } };
     for (const auto& tri : kCorners) {
         Vec3 p[3];
@@ -172,12 +172,12 @@ void buildSkirtMesh(RzContext* ctx) {
     uint32_t palette[kPaletteSize];
     buildPalette(palette);
 
-    std::vector<TerrainVertex>& mesh = ctx->skirtStaging;   // reaproveitado (aloca só na 1ª)
+    std::vector<TerrainVertex>& mesh = ctx->skirtStaging;   // reused (allocates only the 1st time)
     mesh.clear();
     mesh.reserve(size_t(60000) * 3);
-    // Região da célula: 0 norte (r < 0, com os cantos), 2 sul (r >= 255),
-    // 3 oeste (c < 0), 1 leste (c >= 255). Cada uma fica contígua no buffer,
-    // para drawSkirt pular as que estão além da neblina.
+    // The cell's region: 0 north (r < 0, with the corners), 2 south (r >= 255),
+    // 3 west (c < 0), 1 east (c >= 255). Each one is contiguous in the buffer,
+    // for drawSkirt to skip those past the fog.
     auto regionOf = [](int32_t c, int32_t r) {
         if (r < 0) return 0;
         if (r >= kQuadsPerSide) return 2;
@@ -185,7 +185,7 @@ void buildSkirtMesh(RzContext* ctx) {
     };
     for (int32_t region = 0; region < 4; ++region) {
         ctx->skirtFirst[region] = int32_t(mesh.size());
-        // Cada faixa, menos o que está dentro da anterior (a primeira: menos o mapa)
+        // Each band, less what is inside the previous one (the first: less the map)
         for (int32_t i = 0; i < kSkirtBandCount; ++i) {
             const int32_t step = kSkirtBands[i].step;
             const int32_t lo = i + 1 < kSkirtBandCount ? bandLo(i) : kExtLo;
@@ -203,7 +203,7 @@ void buildSkirtMesh(RzContext* ctx) {
         ctx->skirtCount[region] = int32_t(mesh.size()) - ctx->skirtFirst[region];
     }
     glBindBuffer(GL_ARRAY_BUFFER, ctx->skirtVbo);
-    if (ctx->skirtVertexCount == int32_t(mesh.size())) {     // mesmo tamanho: sem realocar
+    if (ctx->skirtVertexCount == int32_t(mesh.size())) {     // same size: no reallocation
         glBufferSubData(GL_ARRAY_BUFFER, 0, GLsizeiptr(mesh.size() * sizeof(TerrainVertex)), mesh.data());
     } else {
         glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(mesh.size() * sizeof(TerrainVertex)), mesh.data(),
@@ -212,15 +212,15 @@ void buildSkirtMesh(RzContext* ctx) {
     ctx->skirtVertexCount = int32_t(mesh.size());
 }
 
-// Parede: um quad por tile em cada um dos quatro lados, da altura da borda
-// (um pouco abaixo, para não deixar fresta) até kBorderWallHeight acima
+// Wall: a quad per tile on each of the four sides, from the border's height
+// (a little below, not to leave a crack) up to kBorderWallHeight above
 void buildWallMesh(RzContext* ctx) {
     const float cs = ctx->cellSize, hs = ctx->heightScale;
     const uint8_t* h = ctx->heights.data();
     std::vector<WallVertex> mesh;
     mesh.reserve(size_t(4) * kQuadsPerSide * 6);
     const float sink = 0.5f * cs, top = kBorderWallHeight * cs;
-    // lado: ponto i da borda -> (x, z, altura)
+    // side: point i of the border -> (x, z, height)
     auto point = [&](int32_t side, int32_t i, float* x, float* z, float* y) {
         int32_t gx = 0, gz = 0;
         switch (side) {
@@ -254,31 +254,31 @@ void buildWallMesh(RzContext* ctx) {
 
 } // namespace
 
-// Bloco de uma célula da continuação. Em geral continua o bloco do quad da
-// borda que está "na frente" da célula (rio continua rio), mas o ponto de onde
-// se copia vai serpenteando: ao longo da borda, ele se desloca por um ruído de
-// valor suave em (posição ao longo, distância para fora), com amplitude que
-// cresce com a distância (até kSkirtMeanderMax tiles). Células vizinhas têm
-// deslocamentos parecidos, então as faixas continuam juntas e fazem curvas em
-// vez de seguir em linha reta. Com chance kSkirtJitterPercent %, a célula
-// pega um bloco sorteado da janela perto da borda (kSkirtTileBand), para
-// quebrar a repetição. Nos cantos (fora nos dois eixos), copia o quad do canto.
+// Block of a cell of the continuation. Mostly it continues the block of the
+// border's quad that is "in front" of the cell (a river goes on as a river),
+// but the point it copies from meanders: along the border, it shifts by a
+// smooth value noise in (position along, distance out), with an amplitude that
+// grows with the distance (up to kSkirtMeanderMax tiles). Neighbouring cells
+// have similar shifts, so the bands stay together and curve instead of going
+// in a straight line. With a chance of kSkirtJitterPercent %, the cell
+// takes a block drawn by lot from the window near the border (kSkirtTileBand),
+// to break the repetition. In the corners (out on both axes), it copies the corner's quad.
 uint8_t skirtTile(const RzContext* ctx, int32_t c, int32_t r) {
     if (ctx->tileMap.empty()) return 0;
-    const int32_t last = kQuadsPerSide - 1;                  // 254: último quad
+    const int32_t last = kQuadsPerSide - 1;                  // 254: the last quad
     const int32_t outC = c < 0 ? -c : (c > last ? c - last : 0);
     const int32_t outR = r < 0 ? -r : (r > last ? r - last : 0);
     const uint32_t h = hash2(c, r, 77u);
 
     int32_t qc, qr;
     if (h % 100u < uint32_t(kSkirtJitterPercent)) {
-        // sorteio na janela perto do ponto da borda mais próximo
+        // drawing lots in the window near the nearest border point
         const int32_t along  = int32_t((h >> 8) % uint32_t(2 * kSkirtTileBand + 1)) - kSkirtTileBand;
         const int32_t inward = int32_t((h >> 20) % uint32_t(kSkirtTileBand));
         qc = c < 0 ? inward : (c > last ? last - inward : c + along);
         qr = r < 0 ? inward : (r > last ? last - inward : r + along);
     } else {
-        // continuação, serpenteando ao longo da borda
+        // continuation, meandering along the border
         auto meander = [](int32_t along, int32_t out, uint32_t seed) {
             float amp = float(out) * kSkirtMeanderGrowth;
             if (amp > kSkirtMeanderMax) amp = kSkirtMeanderMax;
@@ -287,8 +287,8 @@ uint8_t skirtTile(const RzContext* ctx, int32_t c, int32_t r) {
         };
         qc = c < 0 ? 0 : (c > last ? last : c);
         qr = r < 0 ? 0 : (r > last ? last : r);
-        if (outR > 0 && outC == 0) qc += meander(c, outR, r < 0 ? 31u : 37u);   // norte/sul
-        if (outC > 0 && outR == 0) qr += meander(r, outC, c < 0 ? 41u : 43u);   // oeste/leste
+        if (outR > 0 && outC == 0) qc += meander(c, outR, r < 0 ? 31u : 37u);   // north/south
+        if (outC > 0 && outR == 0) qr += meander(r, outC, c < 0 ? 41u : 43u);   // west/east
     }
     qc = qc < 0 ? 0 : (qc > last ? last : qc);
     qr = qr < 0 ? 0 : (qr > last ? last : qr);
@@ -296,14 +296,14 @@ uint8_t skirtTile(const RzContext* ctx, int32_t c, int32_t r) {
 }
 
 bool createBorder(RzContext* ctx) {
-    // Continuação: mesmo formato de vértice do terreno
+    // Continuation: the same vertex format as the terrain's
     glGenVertexArrays(1, &ctx->skirtVao);
     glGenBuffers(1, &ctx->skirtVbo);
     glBindVertexArray(ctx->skirtVao);
     glBindBuffer(GL_ARRAY_BUFFER, ctx->skirtVbo);
     setTerrainVertexLayout();
 
-    // Parede
+    // Wall
     glGenVertexArrays(1, &ctx->wallVao);
     glGenBuffers(1, &ctx->wallVbo);
     glBindVertexArray(ctx->wallVao);
@@ -338,44 +338,44 @@ void destroyBorder(RzContext* ctx) {
     if (ctx->wallProgram.program) glDeleteProgram(ctx->wallProgram.program);
 }
 
-// Um ponto da borda do mapa mudou de altura (rzUpdateTerrain): só as vértices
-// da continuação que estão em cima dele acompanham (sem fresta com o mapa).
-// O resto do terreno de fora, as cores e a parede ficam como estavam
-// (aceito: as mudanças no jogo são raras e pequenas; rzSetHeightmap refaz tudo).
+// A point of the map's border changed height (rzUpdateTerrain): only the
+// vertices of the continuation on top of it follow (no crack with the map).
+// The rest of the outside terrain, the colours and the wall stay as they were
+// (accepted: the changes in the game are rare and small; rzSetHeightmap redoes everything).
 void moveSkirtEdgeVertex(RzContext* ctx, int32_t gc, int32_t gr) {
     const float x = float(gc) * ctx->cellSize, z = float(gr) * ctx->cellSize;
     const float y = float(ctx->heights[size_t(gr) * kGridSize + size_t(gc)]) * ctx->heightScale;
     std::vector<TerrainVertex>& mesh = ctx->skirtStaging;
     glBindBuffer(GL_ARRAY_BUFFER, ctx->skirtVbo);
     for (size_t i = 0; i < mesh.size(); ++i) {
-        if (mesh[i].x != x || mesh[i].z != z) continue;     // mesma conta da montagem: igualdade exata
+        if (mesh[i].x != x || mesh[i].z != z) continue;     // the same sum as when building: exact equality
         mesh[i].y = y;
         glBufferSubData(GL_ARRAY_BUFFER, GLintptr(i * sizeof(TerrainVertex)), GLsizeiptr(sizeof(float) * 3),
                         &mesh[i]);
     }
 }
 
-// Só a malha da continuação (blocos perto da borda mudaram; rzUpdateTerrain)
+// Only the continuation's mesh (blocks near the border changed; rzUpdateTerrain)
 void rebuildSkirtMesh(RzContext* ctx) {
     buildSkirtMesh(ctx);
 }
 
-// Um ponto do mapa (dentro) na cópia estendida, que é igual à altura dele
-// (rzUpdateTerrain, mudança no interior: a borda de fora não depende dele)
+// A point of the map (inside) in the extended copy, which equals its height
+// (rzUpdateTerrain, a change inside: the outer border does not depend on it)
 void setExtendedHeight(RzContext* ctx, int32_t gc, int32_t gr, float height) {
     if (!ctx->extHeights.empty()) ext(ctx, gc, gr) = height;
 }
 
-// Carga (chamada no fim de buildTerrainMesh): alturas estendidas, malha da
-// continuação e da parede
+// Loading (called at the end of buildTerrainMesh): extended heights, the
+// continuation's and the wall's meshes
 void buildBorder(RzContext* ctx) {
     buildExtendedHeights(ctx);
     buildSkirtMesh(ctx);
     buildWallMesh(ctx);
 }
 
-// Altura estendida (mundo) em (x, z), bilinear na resolução da malha
-// (o passo da faixa onde o ponto está; 1 tile no mapa)
+// Extended height (world) at (x, z), bilinear at the mesh's resolution
+// (the step of the band the point is in; 1 tile in the map)
 float extendedGroundHeight(const RzContext* ctx, float x, float z) {
     const float invCell = 1.0f / ctx->cellSize;
     float gx = x * invCell, gz = z * invCell;
@@ -386,7 +386,7 @@ float extendedGroundHeight(const RzContext* ctx, float x, float z) {
     float step = float(kSkirtBands[kSkirtBandCount - 1].step);
     for (int32_t i = kSkirtBandCount - 2; i >= 0; --i)
         if (inside(bandLo(i), bandHi(i))) step = float(kSkirtBands[i].step);
-    const float ox = float(kExtLo);                            // grades alinhadas a kExtLo
+    const float ox = float(kExtLo);                            // grids aligned to kExtLo
     const float cx = floorf((gx - ox) / step) * step + ox;
     const float cz = floorf((gz - ox) / step) * step + ox;
     const float fx = (gx - cx) / step, fz = (gz - cz) / step;
@@ -398,15 +398,15 @@ float extendedGroundHeight(const RzContext* ctx, float x, float z) {
     return (top + (bot - top) * fz) * ctx->heightScale;
 }
 
-// Continuação, nas regiões (0 norte, 1 leste, 2 sul, 3 oeste) que caem em
-// matrix (projeção · view); withFog: também só as que começam antes do fim
-// da neblina (no meio do mapa, nenhuma). Programa e uniforms já prontos.
+// Continuation, in the regions (0 north, 1 east, 2 south, 3 west) that fall
+// within matrix (projection · view); withFog: also only those that start before
+// the end of the fog (in the middle of the map, none). Program and uniforms already set.
 void drawSkirt(const RzContext* ctx, const Mat4& matrix, bool withFog) {
     if (ctx->skirtVertexCount == 0) return;
     const float cs = ctx->cellSize;
     const float lo = float(-kSkirtExtent) * cs, hi = float(kQuadsPerSide + kSkirtExtent) * cs;
     const float m0 = 0.0f, m1 = float(kQuadsPerSide) * cs;
-    const float top = 255.0f * ctx->heightScale;      // alturas de fora: 0..255 (buildExtendedHeights)
+    const float top = 255.0f * ctx->heightScale;      // outside heights: 0..255 (buildExtendedHeights)
     const Vec3 box[4][2] = { { { lo, 0.0f, lo }, { hi, top, m0 } }, { { m1, 0.0f, m0 }, { hi, top, m1 } },
                              { { lo, 0.0f, m1 }, { hi, top, hi } }, { { lo, 0.0f, m0 }, { m0, top, m1 } } };
     const Frustum f = frustumOf(matrix);
@@ -415,7 +415,7 @@ void drawSkirt(const RzContext* ctx, const Mat4& matrix, bool withFog) {
     glBindVertexArray(ctx->skirtVao);
     for (int32_t i = 0; i < 4; ++i) {
         if (ctx->skirtCount[i] == 0 || !boxInFrustum(f, box[i][0], box[i][1])) continue;
-        if (withFog) {                               // na horizontal
+        if (withFog) {                               // horizontally
             const float dx = fmaxf(fmaxf(box[i][0].x - o.x, 0.0f), o.x - box[i][1].x);
             const float dz = fmaxf(fmaxf(box[i][0].z - o.z, 0.0f), o.z - box[i][1].z);
             if (dx * dx + dz * dz > reach * reach) continue;
@@ -424,7 +424,7 @@ void drawSkirt(const RzContext* ctx, const Mat4& matrix, bool withFog) {
     }
 }
 
-// Parede: depois de tudo que é opaco
+// Wall: after everything opaque
 void drawWall(const RzContext* ctx, const Mat4& viewProj) {
     if (!ctx->wallOn || !ctx->hasTerrain() || ctx->wallVertexCount == 0) return;
     const WallProgram& w = ctx->wallProgram;
@@ -435,14 +435,14 @@ void drawWall(const RzContext* ctx, const Mat4& viewProj) {
     glUniform1f(w.fadeFar, kBorderFadeFar * ctx->cellSize);
     glUniform1f(w.xSize, kBorderXSize);
     glUniform1f(w.cellSize, ctx->cellSize);
-    glUniform1f(w.top, kBorderWallHeight + 0.5f);      // v do topo: altura + o que afunda (buildWallMesh)
+    glUniform1f(w.top, kBorderWallHeight + 0.5f);      // v of the top: height + what sinks (buildWallMesh)
     glUniform1f(w.topFade, kBorderTopFade);
     bindFog(ctx, w.fog);
 
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);   // alfa do destino = byte reservado
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);   // the destination's alpha = reserved byte
     glDepthMask(GL_FALSE);
     glBindVertexArray(ctx->wallVao);
     glDrawArrays(GL_TRIANGLES, 0, ctx->wallVertexCount);

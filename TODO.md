@@ -1,19 +1,18 @@
 # TODO
 
-- [x] Parar de carregar o `data.bin`: colocar as constantes direto no código e inicializar o
-      resto dinamicamente.
-- [x] Parar de carregar os `carN.dat` direto na memória: interpretar o arquivo original e
-      carregar de forma inteligente, para que as structs não precisem mais ser `packed`.
-- [x] Tipos `Angle` (0x10000 = 360°) e `Q15` (seno/cosseno, matrizes), como `Pos`/`Vec3`, no
-      lugar de `uint16_t`/`int16_t` soltos (`build_matrix`, câmeras, rodas).
-- [x] Quebrar o `DataSeg` em estruturas por assunto: `world`, `camera`, `render`, `map_tables`,
-      `contact` (terep.hpp, state.cpp); o que era só rascunho virou local ou parâmetro.
-- [ ] `make test` mais completo: mais gravações do Win16 (tests/roteiro-gravacao.md), teste
-      rápido em 4x com ASan/UBSan, build com g++ e clang; CI no GitHub Actions.
-- [x] Corrigir o bug do pulo que corrompe o título (o carro procura o ponto mais baixo como
-      num aperto novo). Os bugs do renderizador ficam como estão.
-- [ ] Câmera livre para o jogador no WebGL (hoje só no editor de checkpoints,
-      `editCheckpoints()`): refinar antes (controles, colisão com o terreno etc.) e dar
-      um jeito de entrar nela sem o console.
+- [x] Stop loading `data.bin`: put the constants straight in the code and initialise the
+      rest dynamically.
+- [x] Stop loading the `carN.dat` straight into memory: parse the original file and
+      load it sensibly, so that the structs no longer need to be `packed`.
+- [x] `Angle` (0x10000 = 360°) and `Q15` (sine/cosine, matrices) types, as `Pos`/`Vec3`, in
+      place of loose `uint16_t`/`int16_t` (`build_matrix`, cameras, wheels).
+- [x] Break `DataSeg` into structures by subject: `world`, `camera`, `render`, `map_tables`,
+      `contact` (terep.hpp, state.cpp); what was only scratch became local or a parameter.
+- [ ] A fuller `make test`: more Win16 recordings, a quick test
+      at 4x with ASan/UBSan, builds with g++ and clang; CI on GitHub Actions.
+- [x] Fix the jump bug that corrupts the title (the car looks for the lowest point as
+      in a new squeeze). The renderer's bugs stay as they are.
+- [x] A free camera for the player in WebGL: F6 (the checkpoint editor's controls; down to
+      0.1 tile over the ground; leaving it with F3 keeps the camera there).
 
-Fora do escopo daqui: widescreen (só no renderizador novo).
+Out of scope here: widescreen (only in the new renderer).

@@ -1,5 +1,5 @@
-// Dados derivados do terreno calculados na CPU, na carga: malha com cores flat
-// iluminadas, paleta pela altura, níveis de mipmap do atlas e esfera envolvente.
+// Data derived from the terrain, worked out on the CPU at loading: a mesh with
+// lit flat colours, a palette by height, the atlas's mipmap levels and the bounding sphere.
 
 #include <cmath>
 #include <vector>
@@ -15,17 +15,17 @@ struct Rgb {
 };
 
 struct PaletteBand {
-    float lo, hi;       // faixa de altura média, na escala do byte (inclusiva)
-    Rgb   from, to;     // gradiente dentro da faixa
+    float lo, hi;       // band of average height, on the byte's scale (inclusive)
+    Rgb   from, to;     // gradient within the band
 };
 
-// Valores provisórios (spec 7.2).
+// Provisional values (spec 7.2).
 constexpr PaletteBand kBands[] = {
-    {   0.0f,  40.0f, {  22.0f,  52.0f, 120.0f }, {  45.0f,  95.0f, 170.0f } },  // água
-    {  41.0f,  60.0f, { 194.0f, 178.0f, 128.0f }, { 212.0f, 196.0f, 146.0f } },  // areia
-    {  61.0f, 150.0f, {  78.0f, 148.0f,  56.0f }, {  38.0f,  98.0f,  34.0f } },  // grama
-    { 151.0f, 210.0f, { 118.0f, 104.0f,  88.0f }, { 152.0f, 142.0f, 132.0f } },  // rocha
-    { 211.0f, 255.0f, { 228.0f, 228.0f, 234.0f }, { 255.0f, 255.0f, 255.0f } },  // neve
+    {   0.0f,  40.0f, {  22.0f,  52.0f, 120.0f }, {  45.0f,  95.0f, 170.0f } },  // water
+    {  41.0f,  60.0f, { 194.0f, 178.0f, 128.0f }, { 212.0f, 196.0f, 146.0f } },  // sand
+    {  61.0f, 150.0f, {  78.0f, 148.0f,  56.0f }, {  38.0f,  98.0f,  34.0f } },  // grass
+    { 151.0f, 210.0f, { 118.0f, 104.0f,  88.0f }, { 152.0f, 142.0f, 132.0f } },  // rock
+    { 211.0f, 255.0f, { 228.0f, 228.0f, 234.0f }, { 255.0f, 255.0f, 255.0f } },  // snow
 };
 
 uint32_t packColor(float r, float g, float b) {
@@ -34,15 +34,15 @@ uint32_t packColor(float r, float g, float b) {
         if (v >= 255.0f) return 255;
         return uint32_t(v + 0.5f);
     };
-    return (channel(r) << 16) | (channel(g) << 8) | channel(b);   // byte reservado = 0
+    return (channel(r) << 16) | (channel(g) << 8) | channel(b);   // reserved byte = 0
 }
 
 } // namespace
 
-// Texels transparentes (alfa 0) recebem a cor dos opacos vizinhos (duas
-// passadas de dilatação, 4-vizinhos; o que sobrar, a média dos opacos), para
-// a filtragem (mistura entre níveis) não puxar a cor do índice
-// 255 nem preto nas bordas dos buracos. O alfa não muda. Imagem quadrada.
+// Transparent texels (alpha 0) get the colour of their opaque neighbours (two
+// dilation passes, 4-neighbours; whatever is left, the opaque ones' average), so
+// that the filtering (blending between levels) does not pull in the colour of
+// index 255 nor black at the holes' edges. The alpha does not change. A square image.
 void fillTransparent(uint32_t* img, int32_t side) {
     uint64_t sum[3] = { 0, 0, 0 };
     uint32_t opaque = 0;
@@ -51,12 +51,12 @@ void fillTransparent(uint32_t* img, int32_t side) {
         ++opaque;
         for (int32_t c = 0; c < 3; ++c) sum[c] += (img[i] >> (16 - 8 * c)) & 0xFF;
     }
-    if (opaque == 0 || opaque == uint32_t(side * side)) return;   // tudo transparente ou nada
+    if (opaque == 0 || opaque == uint32_t(side * side)) return;   // all transparent or none
     uint32_t average = 0;
     for (int32_t c = 0; c < 3; ++c) average |= uint32_t((sum[c] + opaque / 2) / opaque) << (16 - 8 * c);
 
-    // marca dos texels já com cor: bit 24 do próprio texel não serve (alfa), usa
-    // uma passada que só lê de quem tinha cor antes dela
+    // marks the texels with a colour already: bit 24 of the texel itself will not do
+    // (alpha), so it uses a pass that only reads from those that had a colour before it
     std::vector<uint8_t> has(size_t(side) * size_t(side));
     for (int32_t i = 0; i < side * side; ++i) has[size_t(i)] = (img[i] >> 24) != 0;
     std::vector<uint8_t> next;
@@ -89,10 +89,10 @@ void fillTransparent(uint32_t* img, int32_t side) {
     }
 }
 
-// Nível L+1 de uma imagem quadrada a partir do nível L (0xAARRGGBB): alfa =
-// média 2x2; cor = média só dos texels opacos, ponderada pelo alfa (texels
-// transparentes não puxam a cor), arredondada. Usado no atlas e nas texturas
-// dos objetos.
+// Level L+1 of a square image from level L (0xAARRGGBB): alpha =
+// 2x2 average; colour = average of the opaque texels only, weighted by alpha
+// (transparent texels do not pull the colour), rounded. Used in the atlas and in the
+// objects' textures.
 void downsample(const uint32_t* src, uint32_t* dst, int32_t dstSide) {
     const int32_t srcSide = dstSide * 2;
     for (int32_t y = 0; y < dstSide; ++y) {
@@ -114,9 +114,9 @@ void downsample(const uint32_t* src, uint32_t* dst, int32_t dstSide) {
     }
 }
 
-// Direção (normalizada) para a luz, fixa no mundo. Provisória.
+// Direction (normalised) to the light, fixed in the world. Provisional.
 Vec3 lightDirection() {
-    Vec3 l = { -0.45f, 0.45f, -0.40f };   // elevação :)
+    Vec3 l = { -0.45f, 0.45f, -0.40f };   // elevation :)
     const float inv = 1.0f / sqrtf(dot(l, l));
     return { l.x * inv, l.y * inv, l.z * inv };
 }
@@ -152,14 +152,14 @@ void setTerrainVertexLayout() {
     glEnableVertexAttribArray(3);
 }
 
-// Paleta indexada pela soma das 3 alturas de um triângulo (0..765).
+// Palette indexed by the sum of a triangle's 3 heights (0..765).
 void buildPalette(uint32_t* palette) {
     constexpr float third = 1.0f / 3.0f;
     for (int sum = 0; sum < kPaletteSize; ++sum) {
         const float avg = float(sum) * third;
         const PaletteBand* band = &kBands[0];
         for (const PaletteBand& b : kBands) {
-            if (avg >= b.lo - 0.5f) band = &b;    // bandas em ordem crescente
+            if (avg >= b.lo - 0.5f) band = &b;    // bands in increasing order
         }
         float t = (avg - band->lo) / (band->hi - band->lo);
         if (t < 0.0f) t = 0.0f;
@@ -170,32 +170,32 @@ void buildPalette(uint32_t* palette) {
     }
 }
 
-// Malha do terreno (spec 7.1), um vértice por canto de triângulo:
-// diagonal do legado, (c+1, r)–(c, r+1). Cantos  1 2  ->  A = 1 3 2, B = 2 3 4:
-//                                                  3 4
+// The terrain's mesh (spec 7.1), a vertex per triangle corner:
+// the legacy's diagonal, (c+1, r)–(c, r+1). Corners  1 2  ->  A = 1 3 2, B = 2 3 4:
+//                                                    3 4
 //   A = (c, r), (c, r+1), (c+1, r)      B = (c+1, r), (c, r+1), (c+1, r+1)
-// Cor flat: paleta pela soma das 3 alturas, iluminada pela normal da face.
-// u ao longo da coluna, v ao longo da linha; bloco do quad pelo mapa de blocos.
-// Ordem no VBO: em blocos de kChunkQuads x kChunkQuads quads (row-major),
-// cada bloco contíguo e com os quads dele row-major, 6 vértices por quad; o
-// recorte (drawTerrain) desenha só os blocos que aparecem. A malha inteira
-// fica também na CPU (ctx->terrainStaging, na mesma ordem), para
-// rzUpdateTerrain refazer só um retângulo de quads e reenviar só os trechos dele.
+// Flat colour: palette by the sum of the 3 heights, lit by the face's normal.
+// u along the column, v along the row; the quad's block from the block map.
+// Order in the VBO: in chunks of kChunkQuads x kChunkQuads quads (row-major),
+// each chunk contiguous and with its quads row-major, 6 vertices per quad; the
+// culling (drawTerrain) draws only the chunks that show. The whole mesh is
+// also kept on the CPU (ctx->terrainStaging, in the same order), for
+// rzUpdateTerrain to redo only a rectangle of quads and upload only its stretches.
 namespace {
 
-int32_t chunkWidth(int32_t chunk) {          // quads do bloco num eixo (o último é menor)
+int32_t chunkWidth(int32_t chunk) {          // quads of the chunk on an axis (the last one is smaller)
     const int32_t rest = kQuadsPerSide - chunk * kChunkQuads;
     return rest < kChunkQuads ? rest : kChunkQuads;
 }
 
-// Primeiro vértice do quad (c, r) no VBO
+// First vertex of quad (c, r) in the VBO
 size_t quadVertex(const RzContext* ctx, int32_t c, int32_t r) {
     const int32_t cx = c / kChunkQuads, cz = r / kChunkQuads;
     const RzContext::TerrainChunk& k = ctx->terrainChunks[cz * kChunksPerSide + cx];
     return size_t(k.first) + size_t((r % kChunkQuads) * chunkWidth(cx) + c % kChunkQuads) * 6;
 }
 
-// Onde cada bloco começa no VBO (fixo: só depende do tamanho do mapa)
+// Where each chunk starts in the VBO (fixed: only depends on the map's size)
 void layoutChunks(RzContext* ctx) {
     int32_t first = 0;
     for (int32_t cz = 0; cz < kChunksPerSide; ++cz) {
@@ -208,7 +208,7 @@ void layoutChunks(RzContext* ctx) {
     }
 }
 
-// Faixa de alturas (mundo) dos pontos do bloco, bordas incluídas
+// Range of heights (world) of the chunk's points, edges included
 void chunkBounds(RzContext* ctx, int32_t cx, int32_t cz) {
     const uint8_t* h = ctx->heights.data();
     uint8_t lo = 255, hi = 0;
@@ -224,7 +224,7 @@ void chunkBounds(RzContext* ctx, int32_t cx, int32_t cz) {
     k.yMax = float(hi) * ctx->heightScale;
 }
 
-// Quads c0..c1 x r0..r1 (inclusivos) -> staging
+// Quads c0..c1 x r0..r1 (inclusive) -> staging
 void buildQuads(RzContext* ctx, int32_t c0, int32_t r0, int32_t c1, int32_t r1) {
     uint32_t palette[kPaletteSize];
     buildPalette(palette);
@@ -259,12 +259,12 @@ void buildQuads(RzContext* ctx, int32_t c0, int32_t r0, int32_t c1, int32_t r1) 
     }
 }
 
-// Reenvia os quads c0..c1 x r0..r1 (inclusivos): um trecho por linha e bloco
+// Uploads quads c0..c1 x r0..r1 (inclusive) again: a stretch per row and chunk
 void uploadQuads(RzContext* ctx, int32_t c0, int32_t r0, int32_t c1, int32_t r1) {
     glBindBuffer(GL_ARRAY_BUFFER, ctx->terrainVbo);
     for (int32_t r = r0; r <= r1; ++r) {
         for (int32_t c = c0; c <= c1;) {
-            const int32_t end = (c / kChunkQuads + 1) * kChunkQuads - 1;   // último quad do bloco
+            const int32_t end = (c / kChunkQuads + 1) * kChunkQuads - 1;   // the chunk's last quad
             const int32_t last = end < c1 ? end : c1;
             const size_t first = quadVertex(ctx, c, r);
             glBufferSubData(GL_ARRAY_BUFFER, GLintptr(first * sizeof(TerrainVertex)),
@@ -275,7 +275,7 @@ void uploadQuads(RzContext* ctx, int32_t c0, int32_t r0, int32_t c1, int32_t r1)
     }
 }
 
-// A malha inteira
+// The whole mesh
 void uploadAll(RzContext* ctx) {
     glBindBuffer(GL_ARRAY_BUFFER, ctx->terrainVbo);
     glBufferSubData(GL_ARRAY_BUFFER, 0, GLsizeiptr(ctx->terrainStaging.size() * sizeof(TerrainVertex)),
@@ -286,22 +286,22 @@ constexpr int32_t kLastQuad = kQuadsPerSide - 1;   // 254
 
 } // namespace
 
-// Malha inteira + borda; mapa de sombra do terreno inteiro refeito.
-// rzSetHeightmap e rzSetTerrainScale (carga).
+// The whole mesh + border; the whole terrain's shadow map redone.
+// rzSetHeightmap and rzSetTerrainScale (loading).
 bool buildTerrainMesh(RzContext* ctx) {
-    ctx->terrainStaging.resize(size_t(kTriangleCount) * 3);   // carga: aloca na primeira vez
+    ctx->terrainStaging.resize(size_t(kTriangleCount) * 3);   // loading: allocates the first time
     layoutChunks(ctx);
     for (int32_t cz = 0; cz < kChunksPerSide; ++cz)
         for (int32_t cx = 0; cx < kChunksPerSide; ++cx) chunkBounds(ctx, cx, cz);
     buildQuads(ctx, 0, 0, kLastQuad, kLastQuad);
     uploadAll(ctx);
-    buildBorder(ctx);                        // continuação e parede dependem das alturas/blocos
+    buildBorder(ctx);                        // continuation and wall depend on the heights/blocks
     markTerrainShadowAll(ctx);
     return glGetError() == GL_NO_ERROR;
 }
 
-// Só os blocos mudaram (rzSetTileMap): bloco dos quads e da continuação; as
-// alturas, a borda de relevo e a sombra ficam.
+// Only the blocks changed (rzSetTileMap): the quads' and the continuation's
+// blocks; the heights, the relief's border and the shadow stay.
 bool rebuildTerrainTiles(RzContext* ctx) {
     ctx->terrainStaging.resize(size_t(kTriangleCount) * 3);
     layoutChunks(ctx);
@@ -311,19 +311,19 @@ bool rebuildTerrainTiles(RzContext* ctx) {
     return glGetError() == GL_NO_ERROR;
 }
 
-// rzUpdateTerrain: relê os buffers do host (ponteiros guardados), compara com
-// as cópias e, para cada ponto/quad que mudou (no jogo são poucos):
-//   - altura: refaz e reenvia os 4 quads em volta do ponto, atualiza a cópia
-//     estendida (câmera) e a faixa de alturas dos blocos do ponto (a sombra
-//     de longe não é refeita: ver rz_shadow.cpp); se o ponto é da borda do
-//     mapa, só move junto o y das vértices do terreno de fora que estão em
-//     cima dele (moveSkirtEdgeVertex;
-//     o resto de fora não é recalculado: aceito, rzSetHeightmap refaz tudo);
-//   - bloco: refaz e reenvia o quad; se está a menos de kSkirtTileBand quads
-//     da borda, refaz a malha da continuação (ela copia/sorteia dessa faixa).
-// Sem mudança, não faz nada. Não aloca.
+// rzUpdateTerrain: reads the host's buffers again (the pointers kept), compares
+// with the copies and, for each point/quad that changed (few in the game):
+//   - height: redoes and uploads the 4 quads around the point, updates the
+//     extended copy (camera) and the height range of the point's chunks (the
+//     far shadow is not redone: see rz_shadow.cpp); if the point is on the
+//     map's border, it only moves along the y of the outside terrain's
+//     vertices on top of it (moveSkirtEdgeVertex;
+//     the rest outside is not recalculated: accepted, rzSetHeightmap redoes everything);
+//   - block: redoes and uploads the quad; if it is less than kSkirtTileBand quads
+//     from the border, redoes the continuation's mesh (it copies/draws from that band).
+// Without changes, it does nothing. Does not allocate.
 bool updateTerrain(RzContext* ctx) {
-    auto refreshQuads = [&](int32_t c0, int32_t r0, int32_t c1, int32_t r1) {   // inclusivos, recortados
+    auto refreshQuads = [&](int32_t c0, int32_t r0, int32_t c1, int32_t r1) {   // inclusive, clipped
         if (c0 < 0) c0 = 0;
         if (r0 < 0) r0 = 0;
         if (c1 > kLastQuad) c1 = kLastQuad;
@@ -341,7 +341,7 @@ bool updateTerrain(RzContext* ctx) {
             h[i] = src[i];
             setExtendedHeight(ctx, gc, gr, float(src[i]));
             refreshQuads(gc - 1, gr - 1, gc, gr);
-            // faixa de alturas dos blocos do ponto (até 4, na divisa)
+            // height range of the point's chunks (up to 4, on the split)
             for (int32_t cz = (gr - 1) / kChunkQuads; cz <= gr / kChunkQuads; ++cz)
                 for (int32_t cx = (gc - 1) / kChunkQuads; cx <= gc / kChunkQuads; ++cx)
                     if (cx >= 0 && cz >= 0 && cx < kChunksPerSide && cz < kChunksPerSide) chunkBounds(ctx, cx, cz);
@@ -362,11 +362,11 @@ bool updateTerrain(RzContext* ctx) {
                     c > kLastQuad - kSkirtTileBand || r > kLastQuad - kSkirtTileBand) edgeTile = true;
             }
         }
-        // ~3 ms (llvmpipe). Otimização futura possível: só os triângulos de fora
-        // que copiam deste quad (ver spec 12 e o branch super_complicated_border_update)
+        // ~3 ms (llvmpipe). A possible future optimisation: only the outside triangles
+        // that copy from this quad (see spec 12 and the super_complicated_border_update branch)
         if (edgeTile) rebuildSkirtMesh(ctx);
     }
-    return true;                // sem glGetError: chamado no jogo, e no WebGL ele espera a GPU
+    return true;                // no glGetError: called in the game, and in WebGL it waits for the GPU
 }
 
 void drawTerrain(const RzContext* ctx, const Mat4& matrix, bool withFog) {
@@ -375,7 +375,7 @@ void drawTerrain(const RzContext* ctx, const Mat4& matrix, bool withFog) {
     const float reach = ctx->fogFar;
     const Vec3 o = ctx->fogOrigin;
     glBindVertexArray(ctx->terrainVao);
-    int32_t runFirst = 0, runCount = 0;          // blocos seguidos no VBO: um envio só
+    int32_t runFirst = 0, runCount = 0;          // chunks one after the other in the VBO: a single upload
     for (int32_t cz = 0; cz < kChunksPerSide; ++cz) {
         for (int32_t cx = 0; cx < kChunksPerSide; ++cx) {
             const RzContext::TerrainChunk& k = ctx->terrainChunks[cz * kChunksPerSide + cx];
@@ -383,7 +383,7 @@ void drawTerrain(const RzContext* ctx, const Mat4& matrix, bool withFog) {
             const Vec3 hi = { float(cx * kChunkQuads + chunkWidth(cx)) * cs, k.yMax,
                               float(cz * kChunkQuads + chunkWidth(cz)) * cs };
             bool visible = boxInFrustum(f, lo, hi);
-            if (visible && withFog) {            // o ponto da caixa mais perto da origem da neblina
+            if (visible && withFog) {            // the box's point nearest to the fog's origin
                 const float dx = fmaxf(fmaxf(lo.x - o.x, 0.0f), o.x - hi.x);
                 const float dy = fmaxf(fmaxf(lo.y - o.y, 0.0f), o.y - hi.y);
                 const float dz = fmaxf(fmaxf(lo.z - o.z, 0.0f), o.z - hi.z);
@@ -402,26 +402,26 @@ void drawTerrain(const RzContext* ctx, const Mat4& matrix, bool withFog) {
     if (runCount > 0) glDrawArrays(GL_TRIANGLES, runFirst, runCount);
 }
 
-// Esfera envolvente: raio = meia diagonal da caixa do terreno. Usada pela
-// visão geral e pelos planos near/far.
+// Bounding sphere: radius = half the diagonal of the terrain's box. Used by the
+// overview and by the near/far planes.
 void updateTerrainBounds(RzContext* ctx) {
     const float hx = 127.5f * ctx->cellSize;
     const float hy = 127.5f * ctx->heightScale;
     ctx->terrainRadius = sqrtf(hx * hx + hy * hy + hx * hx);
 }
 
-// Atlas paletizado 256x256 (canto do PCX) -> 256 blocos 16x16 em RGBA (rgbaTexel)
-// com os 5 níveis de mipmap, organizados por nível para subir com
-// glTexImage3D: nível L começa em tiles + 256 · kLevelOffset[L].
+// Paletted 256x256 atlas (the PCX's corner) -> 256 blocks of 16x16 in RGBA (rgbaTexel)
+// with the 5 mipmap levels, arranged by level to go up with
+// glTexImage3D: level L starts at tiles + 256 · kLevelOffset[L].
 void buildAtlasLevels(uint32_t* tiles, const uint8_t* indices, const uint8_t* paletteRGB) {
-    constexpr int32_t kLevelOffset[kMipLevels] = { 0, 256, 320, 336, 340 };   // texels por bloco
+    constexpr int32_t kLevelOffset[kMipLevels] = { 0, 256, 320, 336, 340 };   // texels per block
     constexpr int32_t kTilesPerRow = kAtlasSize / kTileSize;
 
     uint32_t pal[256];
     for (int i = 0; i < 256; ++i) {
         const uint32_t rgb = (uint32_t(paletteRGB[i * 3 + 0]) << 16) | (uint32_t(paletteRGB[i * 3 + 1]) << 8)
                            | uint32_t(paletteRGB[i * 3 + 2]);
-        pal[i] = rgbaTexel(rgb, i == kTransparentIndex ? 0 : 255);   // 255: transparente
+        pal[i] = rgbaTexel(rgb, i == kTransparentIndex ? 0 : 255);   // 255: transparent
     }
 
     for (int32_t t = 0; t < kMaxTiles; ++t) {

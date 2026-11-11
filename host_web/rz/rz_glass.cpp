@@ -1,19 +1,19 @@
-// Polígonos translúcidos (vidro) dos objetos.
+// The objects' translucent polygons (glass).
 //
-// Cada objeto pode ter, além dos polígonos opacos, polígonos de vidro em tons
-// de cinza (16 tons: tom/15, 0 = preto, 15 = transparente). O vidro é um filtro
-// multiplicativo (o que está atrás é multiplicado pelo cinza) mais um brilho
-// especular "embaçado" (Blinn-Phong de expoente baixo) da luz direcional, que
-// some na sombra. Em um passe só, com glBlendFunc(GL_ONE, GL_SRC_ALPHA):
-//     destino = especular + destino x cinza
-// O filtro não depende da ordem de desenho, então não há ordenação (com dois
-// vidros sobrepostos, só o brilho do de trás fica um pouco escurecido pelo da
-// frente, ou não: diferença pequena).
+// Each object can have, besides the opaque polygons, glass polygons in shades
+// of grey (16 tones: tone/15, 0 = black, 15 = transparent). The glass is a
+// multiplicative filter (what is behind is multiplied by the grey) plus a
+// "blurred" specular highlight (Blinn-Phong of low exponent) of the directional
+// light, gone in the shadow. In a single pass, with glBlendFunc(GL_ONE, GL_SRC_ALPHA):
+//     destination = specular + destination x grey
+// The filter does not depend on the drawing order, so there is no sorting (with
+// two glasses on top of each other, only the back one's highlight is a little
+// darkened by the front one, or not: a small difference).
 //
-// Desenhado depois dos objetos opacos, sem gravar profundidade nem alfa de
-// destino, com o mesmo culling dos objetos (só a face de fora). Não projeta
-// sombra; recebe (no brilho). Com neblina: o filtro vai para 1 e o brilho para 0.
-// Normal: a de fora (−Newell, sentido do legado), por polígono.
+// Drawn after the opaque objects, writing neither depth nor the destination's
+// alpha, with the same culling as the objects (only the outside face). Casts no
+// shadow; receives it (in the highlight). With fog: the filter goes to 1 and the highlight to 0.
+// Normal: the outward one (−Newell, the legacy's direction), per polygon.
 
 #include <cmath>
 
@@ -27,7 +27,7 @@ bool validId(const RzContext* ctx, int32_t id) {
     return ctx && id >= 0 && id < int32_t(ctx->objects.size()) && ctx->objects[id].alive;
 }
 
-// Monta os vértices (normal de fora e cinza por polígono) e reenvia o VBO
+// Builds the vertices (outward normal and grey per polygon) and uploads the VBO again
 void uploadGlass(Object& o) {
     GlassVertex* v = o.glassStaging.data();
     for (size_t p = 0; p < o.glassStart.size(); ++p) {
@@ -42,7 +42,7 @@ void uploadGlass(Object& o) {
             nn.z += (cur.x - next.x) * (cur.y + next.y);
         }
         const float len = sqrtf(dot(nn, nn));
-        const float inv = len > 0.0f ? -1.0f / len : 0.0f;          // de fora = −Newell
+        const float inv = len > 0.0f ? -1.0f / len : 0.0f;          // outward = −Newell
         const Vec3 normal = { nn.x * inv, nn.y * inv, nn.z * inv };
         const float tint = float(o.glassTone[p]) * (1.0f / 15.0f);
         for (int32_t i = 1; i + 1 < n; ++i) {
@@ -54,7 +54,7 @@ void uploadGlass(Object& o) {
         }
     }
     glBindBuffer(GL_ARRAY_BUFFER, o.glassVbo);
-    if (o.glassResized) {                     // o primeiro envio depois de polígonos novos
+    if (o.glassResized) {                     // the first upload after new polygons
         glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(o.glassStaging.size() * sizeof(GlassVertex)),
                      o.glassStaging.data(), GL_DYNAMIC_DRAW);
         o.glassResized = false;
@@ -86,7 +86,7 @@ void freeGlass(Object& o) {
     o.glassVao = 0;
 }
 
-// Passe do vidro: depois dos objetos opacos
+// The glass pass: after the opaque objects
 void drawGlass(RzContext* ctx, const Mat4& viewProj) {
     const Frustum f = frustumOf(viewProj);
     bool programBound = false;
@@ -103,9 +103,9 @@ void drawGlass(RzContext* ctx, const Mat4& viewProj) {
             bindShadowMaps(ctx, g.shadow);
             bindFog(ctx, g.fog);
             glEnable(GL_CULL_FACE);
-            glCullFace(GL_FRONT);                     // como os objetos: só a face de fora
+            glCullFace(GL_FRONT);                     // as the objects: only the outside face
             glEnable(GL_BLEND);
-            glBlendFunc(GL_ONE, GL_SRC_ALPHA);        // especular + destino x cinza
+            glBlendFunc(GL_ONE, GL_SRC_ALPHA);        // specular + destination x grey
             glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
             glDepthMask(GL_FALSE);
             programBound = true;
@@ -138,13 +138,13 @@ int32_t rzAddObjectTranslucentPolygon(RzContext* ctx, int32_t id,
     Object& o = ctx->objects[id];
 
     int32_t n = count;
-    if (n > 1 && indices[n - 1] == indices[0]) --n;          // fechamento do legado
+    if (n > 1 && indices[n - 1] == indices[0]) --n;          // the legacy's closing
     for (int32_t i = 0; i < n; ++i) {
         if (indices[i] >= o.vertexCount()) return recordError(ctx, "rzAddObjectTranslucentPolygon", RZ_ERR_INVALID_ARG);
     }
-    if (n < 3) return RZ_OK;                                  // degenerado: ignorado
+    if (n < 3) return RZ_OK;                                  // degenerate: ignored
 
-    if (!o.glassVao) {                                        // primeiro vidro do objeto
+    if (!o.glassVao) {                                        // the object's first glass
         glGenVertexArrays(1, &o.glassVao);
         glGenBuffers(1, &o.glassVbo);
         glBindVertexArray(o.glassVao);
@@ -161,14 +161,14 @@ int32_t rzAddObjectTranslucentPolygon(RzContext* ctx, int32_t id,
         glBindVertexArray(0);
     }
 
-    // Cópia (fase de carga: os vetores crescem aqui)
+    // Copy (loading step: the vectors grow here)
     o.glassStart.push_back(int32_t(o.glassIndices.size()));
     o.glassLength.push_back(n);
     o.glassTone.push_back(uint8_t(tone));
     o.glassIndices.insert(o.glassIndices.end(), indices, indices + n);
     o.glassStaging.resize(o.glassStaging.size() + size_t(n - 2) * 3);
 
-    o.glassResized = true;                    // o VBO no próximo envio (uploadGlass), uma vez
+    o.glassResized = true;                    // the VBO at the next upload (uploadGlass), once
     o.glassDirty = true;
     return RZ_OK;
 }

@@ -1,33 +1,33 @@
-// Sombras: cascatas (cascaded shadow maps) da luz direcional. Projeções
-// ortográficas com a mesma view da luz, fixa, olhando para o centro do
-// terreno; cada cascata é uma caixa nessa view.
+// Shadows: cascades (cascaded shadow maps) of the directional light.
+// Orthographic projections with the same light view, fixed, looking at the
+// terrain's centre; each cascade is a box in that view.
 //
-// Seguindo um alvo (com neblina), por distância 3D ao olho:
-//   0  0 .. kCascadeSplit0              terreno + objetos, todo frame
-//   1  .. kCascadeSplit1                terreno + objetos, todo frame
-//   2  .. fim da neblina                só terreno
-// As três são as camadas de uma textura array de profundidade
-// (sampler2DArrayShadow), kShadowMapSize de lado, cada camada no seu FBO.
-// As caixas 0 e 1 envolvem a esfera da fatia do frustum da câmera (raio só
-// depende do FOV e dos limites: não muda quando a câmera gira) e andam em
-// passos de um texel, para a sombra não tremer. Em todas, só os blocos do
-// terreno que caem na caixa são desenhados (drawTerrain).
-// A 2 é um quadrado em volta do olho (meia-largura = fim da neblina +
-// recentragem + margem), desenhado só quando o olho anda kCascadeFarRecenter
-// tiles desde o último desenho, a neblina muda de tamanho ou um terreno novo
-// é carregado (markTerrainShadowAll). O gelo que quebra (rzUpdateTerrain) não
-// a refaz: quebra perto de um carro, que usa as cascatas 0 e 1, refeitas todo
-// frame; de longe a diferença não aparece, e a próxima recentragem já a
-// inclui. Objetos além de kCascadeSplit1 não projetam sombra (aceito: a
-// neblina começa logo depois).
+// Following a target (with fog), by 3D distance to the eye:
+//   0  0 .. kCascadeSplit0              terrain + objects, every frame
+//   1  .. kCascadeSplit1                terrain + objects, every frame
+//   2  .. end of the fog                terrain only
+// The three are the layers of a depth array texture
+// (sampler2DArrayShadow), kShadowMapSize per side, each layer in its own FBO.
+// Boxes 0 and 1 enclose the sphere of the slice of the camera's frustum (the
+// radius only depends on the FOV and the limits: it does not change when the
+// camera turns) and move in steps of a texel, so the shadow does not shake. In
+// all of them, only the terrain's chunks that fall in the box are drawn (drawTerrain).
+// 2 is a square around the eye (half width = end of the fog + recentring +
+// margin), drawn only when the eye moves kCascadeFarRecenter tiles since the
+// last drawing, the fog changes size or a new terrain is loaded
+// (markTerrainShadowAll). Ice that breaks (rzUpdateTerrain) does not
+// redo it: it breaks near a car, which uses cascades 0 and 1, redone every
+// frame; from afar the difference does not show, and the next recentring
+// includes it already. Objects past kCascadeSplit1 cast no shadow (accepted:
+// the fog starts right after).
 //
-// O shader escolhe a cascata pela distância ao olho, com uma faixa de
-// kCascadeBlend tiles antes de cada divisa misturando as duas vizinhas. Fora
-// da caixa de uma cascata, ela não sombreia.
-// Na visão geral (sem alvo, sem neblina): só a cascata 2, cobrindo o terreno
-// inteiro, com terreno e objetos, refeita todo frame.
-// O tamanho é limitado a GL_MAX_TEXTURE_SIZE (o WebGL 2 garante 2048).
-// Em profundidade, todas cobrem a esfera do terreno inteiro com folga.
+// The shader picks the cascade by the distance to the eye, with a band of
+// kCascadeBlend tiles before each split blending the two neighbours. Outside
+// a cascade's box, it does not shade.
+// In the overview (no target, no fog): only cascade 2, covering the whole
+// terrain, with terrain and objects, redone every frame.
+// The size is limited to GL_MAX_TEXTURE_SIZE (WebGL 2 guarantees 2048).
+// In depth, all of them cover the whole terrain's sphere with room to spare.
 
 #include <cmath>
 
@@ -37,13 +37,13 @@ namespace rz {
 
 namespace {
 
-// Caixa de um mapa no plano da luz: centro (cx, cy) na view da luz e meia-largura
+// A map's box in the light's plane: centre (cx, cy) in the light's view and half width
 struct ShadowBox {
     float cx, cy, half;
 };
 
 float shadowRadius(const RzContext* ctx) {
-    return ctx->terrainRadius * 1.1f + 4.0f * ctx->cellSize;   // folga para objetos acima do terreno
+    return ctx->terrainRadius * 1.1f + 4.0f * ctx->cellSize;   // room for objects above the terrain
 }
 
 Vec3 terrainCenter(const RzContext* ctx) {
@@ -59,7 +59,7 @@ Mat4 lightView(const RzContext* ctx) {
     return lookAt(eye, c);
 }
 
-// Ortográfica da caixa; profundidade de R a 3R (a esfera do terreno, vista a 2R)
+// The box's orthographic projection; depth from R to 3R (the terrain's sphere, seen from 2R)
 Mat4 boxProjection(const RzContext* ctx, ShadowBox b) {
     const float radius = shadowRadius(ctx);
     const float nearPlane = radius, farPlane = 3.0f * radius;
@@ -72,7 +72,7 @@ Mat4 boxProjection(const RzContext* ctx, ShadowBox b) {
     return p;
 }
 
-// Caixa centrada no ponto p do mundo, com o centro preso à grade de texels
+// Box centred on the world's point p, with the centre snapped to the texel grid
 ShadowBox snappedBox(const Mat4& view, Vec3 p, float half, int32_t size) {
     float cx = view[0, 0] * p.x + view[0, 1] * p.y + view[0, 2] * p.z + view[0, 3];
     float cy = view[1, 0] * p.x + view[1, 1] * p.y + view[1, 2] * p.z + view[1, 3];
@@ -90,14 +90,14 @@ void beginPass(const RzContext* ctx, int32_t map, const Mat4& matrix) {
 }
 
 
-// Esfera que envolve a parte do frustum da câmera a distância (3D) entre d0 e
-// d1 do olho: a fatia de profundidade [d0 · cos(meia-diagonal), d1]. O raio
-// só depende do FOV e dos limites (estável com a câmera girando).
+// Sphere enclosing the part of the camera's frustum at a (3D) distance between
+// d0 and d1 from the eye: the depth slice [d0 · cos(half diagonal), d1]. The
+// radius only depends on the FOV and the limits (stable as the camera turns).
 float sliceSphere(const RzContext* ctx, float d0, float d1, Vec3* center) {
     const float tx = 1.0f / ctx->focalX, ty = 1.0f / ctx->focalY;
-    const float k2 = tx * tx + ty * ty;                // (meia-diagonal / profundidade)^2
+    const float k2 = tx * tx + ty * ty;                // (half diagonal / depth)^2
     const float n = d0 / sqrtf(1.0f + k2), f = d1;
-    float z = 0.5f * (1.0f + k2) * (f + n);             // centro que iguala os cantos
+    float z = 0.5f * (1.0f + k2) * (f + n);             // centre that evens out the corners
     if (z > f) z = f;
     if (z < n) z = n;
     const float rFar  = sqrtf((f - z) * (f - z) + f * f * k2);
@@ -107,7 +107,7 @@ float sliceSphere(const RzContext* ctx, float d0, float d1, Vec3* center) {
     return rFar > rNear ? rFar : rNear;
 }
 
-// Terreno e continuação: só os blocos e as regiões que caem no mapa
+// Terrain and continuation: only the chunks and the regions that fall in the map
 void drawTerrainDepth(const RzContext* ctx, const Mat4& matrix) {
     if (!ctx->hasTerrain()) return;
     drawTerrain(ctx, matrix, false);
@@ -116,8 +116,8 @@ void drawTerrainDepth(const RzContext* ctx, const Mat4& matrix) {
 
 } // namespace
 
-// A textura array de profundidade com comparação (sampler2DArrayShadow, PCF
-// 2x2 com GL_LINEAR), cada camada num FBO sem cor.
+// The depth array texture with comparison (sampler2DArrayShadow, PCF
+// 2x2 with GL_LINEAR), each layer in an FBO with no colour.
 bool createShadowMaps(RzContext* ctx) {
     GLint driverMax = 0;
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &driverMax);
@@ -138,7 +138,7 @@ bool createShadowMaps(RzContext* ctx) {
         glBindFramebuffer(GL_FRAMEBUFFER, ctx->shadowFbo[i]);
         glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, ctx->shadowTex, 0, i);
         const bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
-        glClear(GL_DEPTH_BUFFER_BIT);                   // vazio = tudo iluminado
+        glClear(GL_DEPTH_BUFFER_BIT);                   // empty = all lit
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         if (!ok) return false;
     }
@@ -159,10 +159,10 @@ void destroyShadowMaps(RzContext* ctx) {
     ctx->shadowTex = 0;
 }
 
-// Calcula as matrizes das cascatas e redesenha as que precisam. Usa o olho
-// e a câmera do frame (updateCamera antes) e os VBOs já enviados
-// (prepareObjects antes). Sem culling (as faces de trás também projetam),
-// com polygon offset contra o "acne".
+// Works out the cascades' matrices and redraws those that need it. Uses the
+// frame's eye and camera (updateCamera before) and the VBOs already uploaded
+// (prepareObjects before). No culling (the back faces cast too),
+// with a polygon offset against "acne".
 void renderShadowMaps(RzContext* ctx) {
     const Mat4 view = lightView(ctx);
     const float radius = shadowRadius(ctx);
@@ -170,8 +170,8 @@ void renderShadowMaps(RzContext* ctx) {
     const bool overview = ctx->shadowWholeTerrain;
 
     glUseProgram(ctx->depthProgram.program);
-    // Teste de profundidade ligado aqui mesmo: sem ele o GL não grava
-    // profundidade (no 1º frame ele ainda não foi ligado pelo passe principal)
+    // Depth test turned on right here: without it GL does not write
+    // depth (at the 1st frame it has not been turned on by the main pass yet)
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LESS);
     glDisable(GL_CULL_FACE);
@@ -179,8 +179,8 @@ void renderShadowMaps(RzContext* ctx) {
     glPolygonOffset(kShadowOffsetFactor, kShadowOffsetUnits);
 
     if (overview) {
-        // Visão geral: só a cascata 2 (na qualidade média, a única), terreno
-        // inteiro + objetos, todo frame
+        // Overview: only cascade 2 (in the medium quality, the only one), the
+        // whole terrain + objects, every frame
         const ShadowBox whole = { 0.0f, 0.0f, radius };
         ctx->shadowMatrix[2] = boxProjection(ctx, whole) * view;
         beginPass(ctx, ctx->cascades - 1, ctx->shadowMatrix[2]);
@@ -195,8 +195,8 @@ void renderShadowMaps(RzContext* ctx) {
         return;
     }
 
-    // Cascatas 0 e 1: esfera da fatia, terreno (linhas da caixa) + objetos.
-    // Com uma cascata só: a 0, do olho até ctx->shadowReach
+    // Cascades 0 and 1: the slice's sphere, terrain (the box's rows) + objects.
+    // With a single cascade: 0, from the eye up to ctx->shadowReach
     const float splits[3] = { 0.0f, kCascadeSplit0 * cs, ctx->shadowReach * cs };
     const float blend = kCascadeBlend * cs;
     const bool single = ctx->cascades == 1;
@@ -204,10 +204,10 @@ void renderShadowMaps(RzContext* ctx) {
         Vec3 center;
         const float d0 = i == 0 ? 0.0f : splits[i] - blend;
         float half = sliceSphere(ctx, d0, splits[single ? 2 : i + 1], &center);
-        half += 2.0f * half / float(ctx->shadowSize);        // + texels do PCF
-        // Tamanho em degraus de kCascadeSizeStep (arredonda para cima): mudando
-        // o FOV, a caixa não muda de tamanho todo frame, e entre os degraus o
-        // encaixe em texels (snappedBox) segura a sombra parada
+        half += 2.0f * half / float(ctx->shadowSize);        // + texels of the PCF
+        // Size in steps of kCascadeSizeStep (rounding up): when the FOV changes,
+        // the box does not change size every frame, and between the steps the
+        // snapping to texels (snappedBox) keeps the shadow still
         const float stepLog = logf(kCascadeSizeStep);
         half = expf(ceilf(logf(half) / stepLog) * stepLog);
         ctx->shadowTexel[i] = 2.0f * half / float(ctx->shadowSize);
@@ -217,7 +217,7 @@ void renderShadowMaps(RzContext* ctx) {
         drawTerrainDepth(ctx, ctx->shadowMatrix[i]);
         drawObjectsDepth(ctx, ctx->shadowMatrix[i], -1, -1);
     }
-    if (single) {                       // sem a cascata 2 (os shaders da variante CASCADES 1 não as leem)
+    if (single) {                       // without cascade 2 (the shaders of the CASCADES 1 variant do not read them)
         ctx->shadowMatrix[1] = ctx->shadowMatrix[2] = ctx->shadowMatrix[0];
         ctx->shadowTexel[1] = ctx->shadowTexel[2] = ctx->shadowTexel[0];
         ctx->cascadeFarValid = false;
@@ -226,16 +226,16 @@ void renderShadowMaps(RzContext* ctx) {
         return;
     }
 
-    // Cascata 2: só terreno, quadrado em volta do olho, refeito só quando precisa
-    // alcance da neblina a partir do olho (na transição da visão geral a
-    // origem dela sai do olho)
+    // Cascade 2: terrain only, a square around the eye, redone only when needed
+    // the fog's reach from the eye (in the transition from the overview its
+    // origin leaves the eye)
     const Vec3 toFog = ctx->fogOrigin - ctx->eyePos;
     const float farHalf = ctx->fogFar + sqrtf(dot(toFog, toFog)) + (kCascadeFarRecenter + kCascadeFarMargin) * cs;
     const float dx = ctx->eyePos.x - ctx->cascadeFarCenter.x, dz = ctx->eyePos.z - ctx->cascadeFarCenter.z;
     const float recenter = kCascadeFarRecenter * cs;
-    // recentra quando o olho andou demais, a neblina mudou ou vem da visão
-    // geral; terreno novo (carga) só redesenha (no mesmo centro: a grade de
-    // texels não pula)
+    // recentres when the eye moved too much, the fog changed or it comes from
+    // the overview; a new terrain (loading) only redraws (at the same centre: the
+    // texel grid does not jump)
     const bool moveBox = !ctx->cascadeFarValid || ctx->cascadeFarOverview || farHalf != ctx->cascadeFarHalf ||
                          dx * dx + dz * dz > recenter * recenter;
     if (moveBox || ctx->terrainShadowDirty) {
@@ -267,7 +267,7 @@ void initShadowUniforms(GLuint program, ShadowUniforms& u) {
     glUniform1f(glGetUniformLocation(program, "uShadowTerminator"), kShadowTerminator);
 }
 
-// Programa já em uso. Deixa a unidade de textura 0 ativa.
+// Program already in use. Leaves texture unit 0 active.
 void bindShadowMaps(const RzContext* ctx, const ShadowUniforms& u) {
     glActiveTexture(GL_TEXTURE0 + GLenum(kUnitShadow));
     glBindTexture(GL_TEXTURE_2D_ARRAY, ctx->shadowTex);

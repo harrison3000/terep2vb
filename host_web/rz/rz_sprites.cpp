@@ -1,30 +1,30 @@
-// Sprites (fumaça, detritos, água espirrando): quads virados para a câmera.
+// Sprites (smoke, debris, splashing water): quads facing the camera.
 //
-// O legado tem um array compacto (um sprite que morre faz os seguintes
-// andarem uma posição), então não há id: rzSetSprites recebe o array inteiro
-// e substitui o anterior. O renderer não guarda estado por sprite.
+// The legacy has a compact array (a sprite that dies makes the following
+// ones move up a position), so there is no id: rzSetSprites gets the whole
+// array and replaces the previous one. The renderer keeps no state per sprite.
 //
-// Cada sprite: centro (tiles), diâmetro (tiles) e tipo.
-//   Detrito: índice de cor na paleta do jogo (a do atlas de blocos; sem
-//     atlas, uma rampa de cinza). A forma é uma textura de ruído "spray do
-//     Paint" (kSpriteClicks cliques de pontinhos perto do centro), com
-//     kSpriteFrames variações numa textura array; o quadro de cada sprite
-//     gira a cada kSpriteFrameTicks frames, deslocado pela posição no array,
-//     para não ficar estático.
-//   Fumaça: disco branco com ruído de valor 3D de baixa frequência, calculado
-//     no shader (x, y no disco + centro no mundo, z = tempo), então muda
-//     sozinho e acompanha o sprite sem saltar quando o array é compactado.
-//     Alfa = ruído x opacidade, com a borda do disco suavizada.
+// Each sprite: centre (tiles), diameter (tiles) and type.
+//   Debris: colour index in the game's palette (that of the block atlas; with
+//     no atlas, a grey ramp). The shape is a noise texture like Paint's
+//     "spray" (kSpriteClicks clicks of dots near the centre), with
+//     kSpriteFrames variations in an array texture; each sprite's picture
+//     turns every kSpriteFrameTicks frames, offset by its position in the
+//     array, so it does not look still.
+//   Smoke: a white disc with low frequency 3D value noise, worked out in the
+//     shader (x, y in the disc + centre in the world, z = time), so it changes
+//     by itself and follows the sprite without jumping when the array is compacted.
+//     Alpha = noise x opacity, with the disc's edge smoothed.
 //
-// Desenho: depois do vidro (fumaça na frente de um vidro não sai tingida) e
-// antes da parede de limite. Blending alfa comum, ordenado de trás para
-// frente na CPU (até kMaxSprites), sem gravar profundidade nem alfa de
-// destino, sem culling. Cor = paleta x luz de uma face virada para cima (como
-// o chão plano), com neblina. Não projeta nem recebe sombra.
+// Drawing: after the glass (smoke in front of a glass does not come out
+// tinted) and before the boundary wall. Ordinary alpha blending, sorted back
+// to front on the CPU (up to kMaxSprites), writing neither depth nor the
+// destination's alpha, no culling. Colour = palette x the light of a face
+// pointing up (as the flat ground), with fog. Neither casts nor receives a shadow.
 //
-// Memória: o VBO (kMaxSprites instâncias, uma por sprite: um glDrawArraysInstanced
-// de 6 vértices, que o shader abre no quad) e os vetores de trabalho são
-// alocados na criação do contexto; rzSetSprites e o desenho não alocam.
+// Memory: the VBO (kMaxSprites instances, one per sprite: one glDrawArraysInstanced
+// of 6 vertices, which the shader opens into the quad) and the work vectors are
+// allocated when the context is created; rzSetSprites and the drawing do not allocate.
 
 #include <algorithm>
 #include <cmath>
@@ -42,11 +42,11 @@ uint32_t hashU32(uint32_t h) {
     return h ^ (h >> 16);
 }
 
-// Ruído "spray": kSpriteClicks cliques, cada um uma nuvem de pontinhos
-// uniformes num disco, com o centro do clique sorteado perto do meio. Alfa em
-// quatro níveis: fora do círculo do sprite 0; dentro, pelo número de cliques
-// que acertaram o pixel (kSpriteAlphaByHits: nenhum, um, dois ou mais).
-// Mipmaps na CPU (média 2x2 do alfa). Uma camada por quadro.
+// "Spray" noise: kSpriteClicks clicks, each a cloud of uniform dots in a
+// disc, with the click's centre drawn by lot near the middle. Alpha in
+// four levels: outside the sprite's circle 0; inside, by the number of clicks
+// that hit the pixel (kSpriteAlphaByHits: none, one, two or more).
+// Mipmaps on the CPU (2x2 average of the alpha). One layer per picture.
 void buildNoiseTexture(RzContext* ctx) {
     constexpr int32_t N = kSpriteNoiseSize;
     constexpr int32_t kLevels = 7;                         // 64 .. 1
@@ -62,17 +62,17 @@ void buildNoiseTexture(RzContext* ctx) {
             const float cx = 0.5f * N + cosf(ca) * cr, cy = 0.5f * N + sinf(ca) * cr;
             const float radius = kSpriteClickRadius * N;
             for (int32_t d = 0; d < kSpriteDotsPerClick; ++d) {
-                const float a = rnd() * 2.0f * kPi, r = sqrtf(rnd()) * radius;   // uniforme no disco
+                const float a = rnd() * 2.0f * kPi, r = sqrtf(rnd()) * radius;   // uniform in the disc
                 const int32_t px = int32_t(cx + cosf(a) * r), py = int32_t(cy + sinf(a) * r);
                 if (px >= 0 && px < N && py >= 0 && py < N) hit[py * N + px] = 1;
             }
-            for (size_t i = 0; i < hits.size(); ++i) hits[i] = uint8_t(hits[i] + hit[i]);   // um clique conta uma vez
+            for (size_t i = 0; i < hits.size(); ++i) hits[i] = uint8_t(hits[i] + hit[i]);   // a click counts once
         }
         uint8_t* img = level0.data() + size_t(f) * N * N;
         for (int32_t y = 0; y < N; ++y) {
             for (int32_t x = 0; x < N; ++x) {
                 const float dx = float(x) + 0.5f - 0.5f * N, dy = float(y) + 0.5f - 0.5f * N;
-                if (dx * dx + dy * dy >= 0.25f * N * N) continue;          // fora do círculo: 0
+                if (dx * dx + dy * dy >= 0.25f * N * N) continue;          // outside the circle: 0
                 const int32_t h = hits[y * N + x] < 2 ? hits[y * N + x] : 2;
                 img[y * N + x] = kSpriteAlphaByHits[h];
             }
@@ -103,16 +103,16 @@ void buildNoiseTexture(RzContext* ctx) {
     }
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, kLevels - 1);
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);           // pontinhos de perto
-    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); // macio de longe
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);           // dots up close
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR); // soft from afar
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
 } // namespace
 
-// Paleta dos sprites: a do atlas (rzLoadTileAtlas); antes dele, rampa de cinza.
-// Já com a luz de uma face virada para cima, como o chão plano.
+// The sprites' palette: the atlas's (rzLoadTileAtlas); before it, a grey ramp.
+// With the light of a face pointing up already, as the flat ground.
 void setSpritePalette(RzContext* ctx, const uint8_t* paletteRGB) {
     const Vec3 l = lightDirection();
     const float light = kAmbient + (1.0f - kAmbient) * (l.y > 0.0f ? l.y : 0.0f);
@@ -148,14 +148,14 @@ bool createSprites(RzContext* ctx) {
     glBindBuffer(GL_ARRAY_BUFFER, ctx->spriteVbo);
     glBufferData(GL_ARRAY_BUFFER, GLsizeiptr(ctx->spriteStaging.size() * sizeof(SpriteInstance)),
                  nullptr, GL_DYNAMIC_DRAW);
-    // Tudo por instância (divisor 1): um registro por sprite
+    // Everything per instance (divisor 1): one record per sprite
     const GLsizei stride = sizeof(SpriteInstance);
-    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(0));   // centro + raio
-    glVertexAttribIPointer(1, 2, GL_BYTE, stride,                                          // quadro, tipo
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, stride, reinterpret_cast<void*>(0));   // centre + radius
+    glVertexAttribIPointer(1, 2, GL_BYTE, stride,                                          // picture, type
                            reinterpret_cast<void*>(offsetof(SpriteInstance, frame)));
-    glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, stride,                         // cor
+    glVertexAttribPointer(2, 4, GL_UNSIGNED_BYTE, GL_TRUE, stride,                         // colour
                           reinterpret_cast<void*>(offsetof(SpriteInstance, color)));
-    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride,                                // opacidade
+    glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, stride,                                // opacity
                           reinterpret_cast<void*>(offsetof(SpriteInstance, opacity)));
     for (GLuint a = 0; a < 4; ++a) {
         glEnableVertexAttribArray(a);
@@ -172,12 +172,12 @@ void destroySprites(RzContext* ctx) {
     if (ctx->spriteNoiseTex) glDeleteTextures(1, &ctx->spriteNoiseTex);
 }
 
-// Depois do vidro, antes da parede
+// After the glass, before the wall
 void drawSprites(RzContext* ctx, const Mat4& viewProj) {
     if (ctx->sprites.empty()) return;
 
-    // Ordem de trás para frente (profundidade ao longo da frente da câmera);
-    // os que estão todos além da neblina ficam de fora
+    // Back to front order (depth along the camera's front);
+    // those entirely past the fog are left out
     const Vec3 eye = ctx->eyePos, fwd = ctx->camForward;
     const float reach = ctx->fogFar;
     ctx->spriteOrder.clear();
@@ -190,14 +190,14 @@ void drawSprites(RzContext* ctx, const Mat4& viewProj) {
             if (dot(dFog, dFog) > lim * lim) continue;
         }
         const float depth = dot(d, fwd);
-        if (depth < -s.radius) continue;                      // todo atrás do olho
+        if (depth < -s.radius) continue;                      // all behind the eye
         ctx->spriteOrder.push_back({ depth, i });
     }
     if (ctx->spriteOrder.empty()) return;
     std::sort(ctx->spriteOrder.begin(), ctx->spriteOrder.end(),
               [](const SpriteKey& a, const SpriteKey& b) { return a.depth > b.depth; });
 
-    // Um registro por sprite, na ordem do desenho
+    // One record per sprite, in drawing order
     const uint32_t tick = uint32_t(ctx->frameTime) / uint32_t(kSpriteFrameTicks);
     SpriteInstance* v = ctx->spriteStaging.data();
     for (const SpriteKey& k : ctx->spriteOrder) {
@@ -224,10 +224,10 @@ void drawSprites(RzContext* ctx, const Mat4& viewProj) {
     glDisable(GL_CULL_FACE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);   // alfa do destino = byte reservado
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);   // the destination's alpha = reserved byte
     glDepthMask(GL_FALSE);
     glBindVertexArray(ctx->spriteVao);
-    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, count);    // dois triângulos por sprite
+    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, count);    // two triangles per sprite
     glDepthMask(GL_TRUE);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDisable(GL_BLEND);
@@ -244,19 +244,19 @@ int32_t rzSetSprites(RzContext* ctx, const RzSprite* sprites, int32_t count) {
     if (count > kMaxSprites) return recordError(ctx, "rzSetSprites", RZ_ERR_SIZE);
     for (int32_t i = 0; i < count; ++i) {
         const RzSprite& s = sprites[i];
-        if (!(s.size > 0.0f && s.size < 1.0e6f)) return recordError(ctx, "rzSetSprites", RZ_ERR_INVALID_ARG);   // pega NaN
+        if (!(s.size > 0.0f && s.size < 1.0e6f)) return recordError(ctx, "rzSetSprites", RZ_ERR_INVALID_ARG);   // catches NaN
         if (!validCoord(s.x) || !validCoord(s.y) || !validCoord(s.z)) {
             return recordError(ctx, "rzSetSprites", RZ_ERR_INVALID_ARG);
         }
         if (s.type != RZ_SPRITE_DEBRIS && s.type != RZ_SPRITE_SMOKE) return recordError(ctx, "rzSetSprites", RZ_ERR_INVALID_ARG);
-        if (!(s.opacity >= 0.0f && s.opacity < 1.0e6f)) return recordError(ctx, "rzSetSprites", RZ_ERR_INVALID_ARG);   // pega NaN
+        if (!(s.opacity >= 0.0f && s.opacity < 1.0e6f)) return recordError(ctx, "rzSetSprites", RZ_ERR_INVALID_ARG);   // catches NaN
     }
     const float scale = ctx->cellSize;
-    ctx->sprites.clear();                                      // capacidade reservada: não aloca
+    ctx->sprites.clear();                                      // capacity reserved: does not allocate
     for (int32_t i = 0; i < count; ++i) {
         const RzSprite& s = sprites[i];
         Sprite d;
-        d.center = { s.x * scale, s.z * scale, s.y * scale };   // (coluna, altura, linha)
+        d.center = { s.x * scale, s.z * scale, s.y * scale };   // (column, height, row)
         d.radius = 0.5f * s.size * ctx->cellSize;
         d.type   = s.type;
         d.opacity = s.opacity;
