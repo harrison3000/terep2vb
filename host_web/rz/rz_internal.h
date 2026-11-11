@@ -53,6 +53,8 @@ constexpr float kFollowHeight    = 1.0f;    // altura acima do alvo (tiles)
 constexpr float kFollowStiffness = 0.08f;
 constexpr float kFollowClearance    = 0.5f;   // altura mínima desejada sobre o chão (tiles)
 constexpr float kFollowMinClearance = 0.1f;   // limite duro sobre o chão (tiles)
+constexpr float kTerrainBubble      = 0.8f;   // perseguição: raio (tiles) da esfera em volta do olho que o
+                                              // chão não entra (o near plane e os cantos dele não cortam o morro)
 constexpr float kFollowClimb        = 0.2f;   // amortecimento ao subir
 // Ponto olhado (alvo suavizado): o tremor do alvo em terreno esburacado não
 // chega à câmera. Forte na vertical, leve na horizontal (pouco atraso).

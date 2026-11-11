@@ -61,6 +61,27 @@ float groundHeight(const RzContext* ctx, float x, float z) {
     return (top + (bot - top) * fz) * ctx->heightScale;
 }
 
+// Bolha do olho contra o terreno: o chão não entra numa esfera de raio
+// kTerrainBubble em volta dele. Amostra o chão no centro e em dois anéis de 8
+// direções (metade do raio e o raio); em cada ponto, a distância horizontal d
+// pede o olho pelo menos sqrt(R² - d²) acima do chão ali. Só empurra para
+// cima (o terreno é um mapa de alturas: subir sempre resolve). Contínua: o
+// máximo de funções contínuas, sem saltos quando o olho anda.
+Vec3 terrainBubble(const RzContext* ctx, Vec3 eye) {
+    const float r = kTerrainBubble * ctx->cellSize;
+    float need = groundHeight(ctx, eye.x, eye.z) + r;
+    for (int32_t ring = 1; ring <= 2; ++ring) {
+        const float d = r * 0.5f * float(ring), up = sqrtf(r * r - d * d);
+        for (int32_t k = 0; k < 8; ++k) {
+            const float a = float(k) * (kPi / 4.0f);
+            const float h = groundHeight(ctx, eye.x + cosf(a) * d, eye.z + sinf(a) * d) + up;
+            if (h > need) need = h;
+        }
+    }
+    if (eye.y < need) eye.y = need;
+    return eye;
+}
+
 // Câmera "na corda": avança o estado da câmera de perseguição um passo de
 // `frames` frames de 60 Hz (os amortecimentos por stepFraction).
 //   - horizontal: se o alvo passa do comprimento da corda, a câmera é puxada
@@ -401,6 +422,8 @@ Mat4 updateCamera(RzContext* ctx) {
             if (ctx->overviewBlend < 0.0f) ctx->overviewBlend = 0.0f;
         }
         ctx->followLastRaw = raw;
+        if (mode != RZ_CAMERA_FOLLOW_FREEZE)                   // (a congelada fica onde foi posta)
+            ctx->followEye = terrainBubble(ctx, ctx->followEye);   // a bolha: o chão não chega perto
         eye = ctx->followEye;
         if (ctx->overviewActive || ctx->retargetActive || mode == RZ_CAMERA_FOLLOW_FREEZE) {
             at = ctx->followLook;
